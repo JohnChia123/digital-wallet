@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/digital_wallet}
+    username: ${DB_USER:wallet}
+    password: ${DB_PASSWORD:wallet}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+wallet:
+  jwt:
+    # HMAC secret simulating the external identity service (min 32 bytes)
+    secret: ${WALLET_JWT_SECRET:change-me-change-me-change-me-32b}
