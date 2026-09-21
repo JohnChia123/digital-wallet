@@ -1,9 +1,23 @@
 package com.example.wallet;
 
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -11,31 +25,8 @@ import com.example.wallet.entity.Wallet;
 import com.example.wallet.entity.WalletStatus;
 import com.example.wallet.repository.WalletRepository;
 import com.example.wallet.service.WalletService;
-import java.math.BigDecimal;
-import java.util.List;
-import java.util.UUID;
-import java.util.concurrent.*;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
-@SpringBootTest
-@AutoConfigureMockMvc
-@Testcontainers
-class WalletApiTest {
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16");
-
+class WalletApiTest extends AbstractIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired WalletRepository wallets;
     @Autowired WalletService service;
@@ -43,6 +34,7 @@ class WalletApiTest {
 
     @BeforeEach
     void clean() {
+        jdbc.update("DELETE FROM transactions");
         jdbc.update("DELETE FROM wallets");
         jdbc.update("DELETE FROM users");
     }

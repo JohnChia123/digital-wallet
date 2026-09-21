@@ -588,6 +588,87 @@ Withdrawal additionally requires the OTP simulation specified by the assignment.
 
 ---
 
+## Iteration 3 is split into sub-iterations
+
+Iteration 3 is too large to build and verify in one go. Implement it as the sub-iterations below, in order.
+The sections that follow (Deposit, Withdrawal, Idempotency, ...) are the detailed reference; each
+sub-iteration uses only the parts named in its scope.
+
+Stop after each sub-iteration unless explicitly instructed to continue.
+Run all tests and commit-ready state before moving on.
+
+### 3a — Deposit (no idempotency yet)
+
+Scope:
+
+* `POST /wallets/{walletId}/deposits` (JWT only; `Idempotency-Key` is added in 3b)
+* wallet balance update and `transactions` row (DEPOSIT, PENDING) in one database transaction
+* simple mock payment provider `POST /mock-payments/deposits` (always succeeds; failure modes are added in 3d)
+* call the mock provider AFTER the database transaction commits, then PENDING -> COMPLETED (or FAILED)
+
+Tests: successful deposit, invalid amount, wallet balance updated correctly, gateway success, gateway failure.
+
+### 3b — Idempotency
+
+Scope:
+
+* `idempotency_keys` table, `UNIQUE(user_id, idempotency_key)`
+* `Idempotency-Key` header required on deposits
+* same key + same request -> original response returned, money moved once
+* same key + different request body -> rejected
+
+Tests: duplicate idempotency key, same key with a different request, concurrent duplicate requests.
+
+### 3c — Withdrawal core (no gateway yet)
+
+Scope:
+
+* `POST /wallets/{walletId}/withdrawals` with `Idempotency-Key`
+* one database transaction: lock wallet row (or atomic conditional update), validate ACTIVE, validate simulated OTP,
+  verify balance >= amount, debit balance, insert WITHDRAWAL transaction as PENDING
+* document the chosen concurrency strategy
+
+Tests: successful withdrawal, insufficient balance, invalid amount, invalid OTP, inactive wallet,
+duplicate idempotency key, concurrent withdrawals cannot make the balance negative (real PostgreSQL via Testcontainers).
+
+### 3d — Withdrawal gateway and compensation
+
+Scope:
+
+* mock `POST /mock-payments/withdrawals`, with idempotency on the gateway side
+* mock provider failure modes (success, permanent failure, timeout)
+* PENDING -> COMPLETED on success
+* definite failure -> compensation: refund balance and PENDING -> FAILED in one database transaction
+* timeout does NOT compensate; the transaction stays PENDING and a gateway retry must not pay out twice
+* the database transaction must never stay open during the HTTP call
+
+Tests: gateway success, gateway permanent failure, compensation restores balance
+(balance 100 -> withdraw 50 -> 50/PENDING -> failure -> 100/FAILED), gateway timeout, idempotent gateway retry.
+
+### 3e — Transaction limits
+
+Scope:
+
+* configurable daily and weekly deposit and withdrawal limits from environment variables
+* no hardcoded limits
+* concurrent requests must not bypass a limit (build on the wallet row lock from 3c)
+
+Tests: daily and weekly limit exceeded for deposits and withdrawals, concurrent requests cannot bypass a limit.
+
+### 3f — Retries and audit logging
+
+Scope:
+
+* retry only transient failures (timeout, connection reset, HTTP 5xx) with exponential backoff and jitter,
+  always combined with idempotency; never retry 400/401/403, insufficient funds or invalid OTP
+* structured logs with walletId, transactionId, idempotencyKey, correlation ID, operation, status
+* never log JWTs, OTP values, credentials or other secrets
+* transaction history is never silently modified or deleted
+
+Tests: transient failures are retried, non-retryable failures are not, sensitive values do not appear in logs.
+
+---
+
 # Deposit
 
 Example:
@@ -940,7 +1021,7 @@ other sensitive secrets
 
 # Iteration 3 Tests
 
-Add comprehensive tests for:
+Add comprehensive tests for the following. Each sub-iteration adds the tests for its own scope (see the split above):
 
 ## Deposit
 
@@ -1101,17 +1182,20 @@ filters
 
         ↓
 
-ITERATION 3
-POST /wallets/{walletId}/deposits
-POST /wallets/{walletId}/withdrawals
-idempotency
-concurrency
-limits
-OTP
-mock payment provider
-retry
-compensation
-+ tests
+ITERATION 3 (split; see "Iteration 3 is split into sub-iterations")
+
+        3a  Deposit (mock provider, no idempotency)
+         ↓
+        3b  Idempotency
+         ↓
+        3c  Withdrawal core (locking, OTP, balance checks)
+         ↓
+        3d  Withdrawal gateway + compensation + timeout handling
+         ↓
+        3e  Daily/weekly limits
+         ↓
+        3f  Retries + audit logging
++ tests at every step
 ```
 
 Prioritize correctness and understandable code over unnecessary complexity.

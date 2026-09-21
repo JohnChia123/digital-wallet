@@ -25,6 +25,11 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse("WALLET_ALREADY_EXISTS", "A wallet already exists for this user"));
     }
 
+    @ExceptionHandler(InvalidRequestException.class)
+    ResponseEntity<ErrorResponse> invalid(InvalidRequestException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", e.getMessage()));
+    }
+
     @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
     ResponseEntity<ErrorResponse> badRequest() {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", "Invalid request"));
