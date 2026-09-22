@@ -7,20 +7,27 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.wallet.dto.DepositRequest;
 import com.example.wallet.dto.WalletResponse;
+import com.example.wallet.service.DepositService;
 import com.example.wallet.service.WalletService;
+
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/wallets")
 public class WalletController {
     private final WalletService service;
+    private final DepositService depositService;
 
-    public WalletController(WalletService service) {
+    public WalletController(WalletService service, DepositService depositService) {
         this.service = service;
+        this.depositService = depositService;
     }
 
     // Authentication.getName() is the JWT subject = user ID.
@@ -34,5 +41,13 @@ public class WalletController {
     @ResponseStatus(HttpStatus.OK)
     public WalletResponse get(@PathVariable UUID walletId, Authentication auth) {
         return WalletResponse.from(service.get(walletId, auth.getName()));
+    }
+
+    @PostMapping("/{walletId}/deposits")
+    public WalletResponse deposit(
+        @PathVariable UUID walletId,
+        @RequestBody @Valid DepositRequest request,
+        Authentication auth) {
+        return WalletResponse.from(depositService.deposit(walletId, auth.getName(), request.amount()));
     }
 }

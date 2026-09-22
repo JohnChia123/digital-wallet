@@ -35,6 +35,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", "Invalid request"));
     }
 
+    // Thrown by @Valid on a @RequestBody, e.g. DepositRequest's @NotNull/@Positive amount.
+    @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
+    ResponseEntity<ErrorResponse> validationFailed(org.springframework.web.bind.MethodArgumentNotValidException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", "Invalid request"));
+    }
+
     @ExceptionHandler(Exception.class)
     ResponseEntity<ErrorResponse> other(Exception e) {
         log.error("Unhandled error", e);

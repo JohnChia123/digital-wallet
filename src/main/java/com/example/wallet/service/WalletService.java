@@ -1,14 +1,17 @@
 package com.example.wallet.service;
 
+import java.math.BigDecimal;
+import java.util.UUID;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.example.wallet.entity.User;
 import com.example.wallet.entity.Wallet;
 import com.example.wallet.exception.WalletAlreadyExistsException;
 import com.example.wallet.exception.WalletNotFoundException;
 import com.example.wallet.repository.UserRepository;
 import com.example.wallet.repository.WalletRepository;
-import java.util.UUID;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class WalletService {
@@ -41,5 +44,37 @@ public class WalletService {
         return wallets.findById(walletId)
                 .filter(w -> w.getUserId().equals(userId))
                 .orElseThrow(WalletNotFoundException::new);
+    }
+
+    @Transactional 
+    public Wallet deposit(UUID walletId, String userId, BigDecimal amount) {
+        Wallet wallet = wallets.findById(walletId).filter(w -> w.getUserId().equals(userId)).orElseThrow(WalletNotFoundException::new);
+        BigDecimal balance = wallet.getBalance();
+        BigDecimal newAmount = balance.add(amount);
+        BigDecimal curReserved = wallet.getReserved();
+        BigDecimal newReserved = curReserved.add(amount);
+        wallet.setBalance(newAmount);
+        wallet.setReserved(newReserved);
+        return wallets.save(wallet);
+    }
+
+    public Wallet revertDeposit(UUID walletId, String userId, BigDecimal amount) {
+        Wallet wallet = wallets.findById(walletId).filter(w -> w.getUserId().equals(userId)).orElseThrow(WalletNotFoundException::new);
+        BigDecimal balance = wallet.getBalance();
+        BigDecimal curReserved = wallet.getReserved();
+        BigDecimal newAmount = balance.subtract(amount);
+        BigDecimal newReserved = curReserved.subtract(amount);
+        wallet.setBalance(newAmount);
+        wallet.setReserved(newReserved);
+        return wallets.save(wallet);
+    }
+
+    @Transactional 
+    public Wallet withdraw(UUID walletId, String userId, BigDecimal amount){
+        Wallet wallet = wallets.findById(walletId).filter(w -> w.getUserId().equals(userId)).orElseThrow(WalletNotFoundException::new);
+        BigDecimal balance = wallet.getBalance();
+        BigDecimal newAmount = balance.subtract(amount);
+        wallet.setBalance(newAmount);
+        return wallets.save(wallet);
     }
 }

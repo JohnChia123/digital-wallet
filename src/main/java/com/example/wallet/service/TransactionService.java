@@ -1,11 +1,11 @@
 package com.example.wallet.service;
 
-import com.example.wallet.entity.Transaction;
-import com.example.wallet.exception.InvalidRequestException;
-import com.example.wallet.repository.TransactionRepository;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.UUID;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -13,15 +13,21 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.wallet.entity.Transaction;
+import com.example.wallet.entity.TransactionStatus;
+import com.example.wallet.entity.TransactionType;
+import com.example.wallet.exception.InvalidRequestException;
+import com.example.wallet.repository.TransactionRepository;
+
 @Service
 public class TransactionService {
     public static final int MAX_PAGE_SIZE = 100;
 
-    private final TransactionRepository transactions;
+    private final TransactionRepository txnRepo;
     private final WalletService wallets;
 
-    public TransactionService(TransactionRepository transactions, WalletService wallets) {
-        this.transactions = transactions;
+    public TransactionService(TransactionRepository txnRepo, WalletService wallets) {
+        this.txnRepo = txnRepo;
         this.wallets = wallets;
     }
 
@@ -46,7 +52,7 @@ public class TransactionService {
 
         // Newest first; id as tiebreaker so pages are stable.
         var sort = Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id"));
-        return transactions.findAll(spec, PageRequest.of(page, size, sort));
+        return txnRepo.findAll(spec, PageRequest.of(page, size, sort));
     }
 
     private void validate(TransactionFilter f, int page, int size) {
@@ -56,5 +62,23 @@ public class TransactionService {
         if (from != null && to != null && from.isAfter(to)) throw new InvalidRequestException("from must not be after to");
         if (f.minAmount() != null && f.maxAmount() != null && f.minAmount().compareTo(f.maxAmount()) > 0)
             throw new InvalidRequestException("minAmount must not exceed maxAmount");
+    }
+
+    @Transactional
+    public UUID insert(UUID walletId, BigDecimal amount) {
+        Transaction txn = new Transaction(walletId, TransactionType.DEPOSIT, amount, TransactionStatus.PENDING, null, Instant.now());
+        txnRepo.save(txn);
+        return txn.getId();
+    }
+
+    @Transactional 
+    public void insertTransactionStatus(UUID txnId, TransactionStatus txnStatus) {
+        Transaction txn = txnRepo.getReferenceById(txnId);
+        if ( txn.getStatus() == TransactionStatus.COMPLETED || 
+            txn.getStatus() == TransactionStatus.FAILED) {
+                return;
+        }
+        txn.setStatus(txnStatus);
+        txnRepo.save(txn);
     }
 }
