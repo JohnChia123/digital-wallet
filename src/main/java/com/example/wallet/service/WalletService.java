@@ -58,15 +58,24 @@ public class WalletService {
         return wallets.save(wallet);
     }
 
+    private Wallet revertReserved(Wallet wallet, BigDecimal amount) {
+        wallet.setReserved(wallet.getReserved().subtract(amount));
+        return wallet;
+    }
+    
+    @Transactional
     public Wallet revertDeposit(UUID walletId, String userId, BigDecimal amount) {
         Wallet wallet = wallets.findById(walletId).filter(w -> w.getUserId().equals(userId)).orElseThrow(WalletNotFoundException::new);
-        BigDecimal balance = wallet.getBalance();
-        BigDecimal curReserved = wallet.getReserved();
-        BigDecimal newAmount = balance.subtract(amount);
-        BigDecimal newReserved = curReserved.subtract(amount);
-        wallet.setBalance(newAmount);
-        wallet.setReserved(newReserved);
+        wallet = revertReserved(wallet, amount);
+        wallet.setBalance(wallet.getBalance().subtract(amount));
         return wallets.save(wallet);
+    }
+
+    @Transactional
+    public Wallet confirmDeposit(UUID walletId, String userId, BigDecimal amount) {
+        Wallet wallet = wallets.findById(walletId).filter(w -> w.getUserId().equals(userId)).orElseThrow(WalletNotFoundException::new);
+        wallet = revertReserved(wallet, amount);
+        return wallets.save(wallet); 
     }
 
     @Transactional 

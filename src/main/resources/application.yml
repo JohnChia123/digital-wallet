@@ -11,3 +11,9 @@ wallet:
   jwt:
     # HMAC secret simulating the external identity service (min 32 bytes)
     secret: ${WALLET_JWT_SECRET:change-me-change-me-change-me-32b}
+  payment:
+    # The mock payment gateway lives in this same app; treat it as an external base URL anyway.
+    base-url: ${PAYMENT_BASE_URL:http://localhost:8080}
+logging:
+  level:
+    org.springframework.security: DEBUG

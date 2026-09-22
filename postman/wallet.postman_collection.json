@@ -298,6 +298,549 @@
           }
         }
       ]
+    },
+    {
+      "name": "9. Deposit into wallet (alice) - 200",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/deposits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "deposits"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 100.0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"balance credited\", () => pm.expect(pm.response.json().balance).to.eql(100));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Deposit invalid amount (negative) - 400",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/deposits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "deposits"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": -5}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+              "pm.test(\"code\", () => pm.expect(pm.response.json().code).to.eql(\"INVALID_REQUEST\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Deposit into alice's wallet as mallory - 404",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/deposits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "deposits"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 50.0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{malloryToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Deposit without auth - 401",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/deposits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "deposits"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 50.0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 401\", () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. List transactions (alice) - 200",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/transactions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "transactions"
+          ]
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"has items\", () => pm.expect(pm.response.json().totalElements).to.be.above(0));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. Filter by type=DEPOSIT - 200",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/transactions?type=DEPOSIT",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "transactions"
+          ],
+          "query": [
+            {
+              "key": "type",
+              "value": "DEPOSIT"
+            }
+          ]
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15. Filter by status=COMPLETED - 200",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/transactions?status=COMPLETED",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "transactions"
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "COMPLETED"
+            }
+          ]
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. Paginated (page=0&size=1) - 200",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/transactions?page=0&size=1",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "transactions"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "0"
+            },
+            {
+              "key": "size",
+              "value": "1"
+            }
+          ]
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"size respected\", () => pm.expect(pm.response.json().items.length).to.be.at.most(1));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17. Invalid type filter - 400",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/transactions?type=BANANA",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "transactions"
+          ],
+          "query": [
+            {
+              "key": "type",
+              "value": "BANANA"
+            }
+          ]
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+              "pm.test(\"code\", () => pm.expect(pm.response.json().code).to.eql(\"INVALID_REQUEST\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18. Transactions for nonexistent wallet - 404",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/00000000-0000-0000-0000-000000000000/transactions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "00000000-0000-0000-0000-000000000000",
+            "transactions"
+          ]
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "19. Transactions as mallory (not owner) - 404",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/transactions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "transactions"
+          ]
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{malloryToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20. Transactions without auth - 401",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/transactions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "transactions"
+          ]
+        },
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 401\", () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
     }
   ],
   "variable": [

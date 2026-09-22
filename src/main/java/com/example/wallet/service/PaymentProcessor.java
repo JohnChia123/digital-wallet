@@ -39,7 +39,7 @@ public class PaymentProcessor {
             PaymentResponse response = paymentRestClient.post()
                     .uri("/deposits")
                     .body(new PaymentRequest(
-                            walletId,
+                            txnId,
                             amount,
                             "USD"
                     ))
@@ -53,6 +53,12 @@ public class PaymentProcessor {
             transactionService.insertTransactionStatus(
                     txnId,
                     TransactionStatus.COMPLETED
+            );
+            
+            walletService.confirmDeposit(
+                    walletId,
+                    userId,
+                    amount
             );
 
         } catch (Exception e) {

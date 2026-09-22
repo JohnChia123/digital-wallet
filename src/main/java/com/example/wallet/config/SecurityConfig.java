@@ -1,10 +1,13 @@
 package com.example.wallet.config;
 
 import java.nio.charset.StandardCharsets;
+
 import javax.crypto.spec.SecretKeySpec;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -21,7 +24,9 @@ public class SecurityConfig {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(a -> a.anyRequest().authenticated())
+                .authorizeHttpRequests(a -> a.requestMatchers(HttpMethod.POST, "/deposits/**", "/withdraws/**").permitAll()
+                    .anyRequest().authenticated()
+                )
                 .oauth2ResourceServer(o -> o.jwt(j -> {}))
                 .build();
     }

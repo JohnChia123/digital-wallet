@@ -1,3 +1,16 @@
 wallet:
   jwt:
     secret: test-secret-test-secret-test-secret-32
+  payment:
+    # Fixed (not random) so it can equal server.port below without a @DynamicPropertySource.
+    # Distinct from 8080 so this doesn't collide with a `mvn spring-boot:run` left running locally.
+    base-url: http://localhost:9090
+
+# Only DepositApiTest actually starts a real listener (webEnvironment = DEFINED_PORT); everything
+# else uses MockMvc's mock dispatch, which ignores this.
+server:
+  port: 9090
+
+logging:
+  level:
+    org.springframework.security: DEBUG

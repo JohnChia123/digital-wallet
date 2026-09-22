@@ -3,7 +3,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 public record PaymentRequest(
-    UUID transactionId,
+    UUID txnId,
     BigDecimal amount,
     String currency
 ) {}
