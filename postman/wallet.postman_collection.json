@@ -307,6 +307,10 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "dep-9"
           }
         ],
         "url": {
@@ -361,6 +365,10 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "dep-10"
           }
         ],
         "url": {
@@ -415,6 +423,10 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "dep-11"
           }
         ],
         "url": {
@@ -468,6 +480,10 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "dep-12"
           }
         ],
         "url": {
@@ -837,6 +853,176 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"status is 401\", () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21. Deposit missing Idempotency-Key - 400",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/deposits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "deposits"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 20.0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+              "pm.test(\"code\", () => pm.expect(pm.response.json().code).to.eql(\"INVALID_REQUEST\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22. Retry same Idempotency-Key + same body - replays original, 200",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": "dep-9"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/deposits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "deposits"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 100.0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"balance unchanged from request 9\", () => pm.expect(pm.response.json().balance).to.eql(100));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "23. Same Idempotency-Key, different body - 409",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Idempotency-Key",
+            "value": "dep-9"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/wallets/{{walletId}}/deposits",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "wallets",
+            "{{walletId}}",
+            "deposits"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"amount\": 999.0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{aliceToken}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+              "pm.test(\"code\", () => pm.expect(pm.response.json().code).to.eql(\"IDEMPOTENCY_KEY_REUSED\"));"
             ]
           }
         }

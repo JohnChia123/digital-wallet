@@ -30,6 +30,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", e.getMessage()));
     }
 
+    @ExceptionHandler(IdempotencyKeyReusedException.class)
+    ResponseEntity<ErrorResponse> idempotencyKeyReused(IdempotencyKeyReusedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("IDEMPOTENCY_KEY_REUSED", e.getMessage()));
+    }
+
+    @ExceptionHandler(IdempotencyKeyInProgressException.class)
+    ResponseEntity<ErrorResponse> idempotencyKeyInProgress(IdempotencyKeyInProgressException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("IDEMPOTENCY_KEY_IN_PROGRESS", e.getMessage()));
+    }
+
+    @ExceptionHandler(org.springframework.web.bind.MissingRequestHeaderException.class)
+    ResponseEntity<ErrorResponse> missingHeader(org.springframework.web.bind.MissingRequestHeaderException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", e.getMessage()));
+    }
+
     @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
     ResponseEntity<ErrorResponse> badRequest() {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", "Invalid request"));

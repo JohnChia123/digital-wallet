@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,7 +16,10 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.wallet.dto.DepositRequest;
 import com.example.wallet.dto.WalletResponse;
 import com.example.wallet.service.DepositService;
+import com.example.wallet.service.IdempotencyService;
 import com.example.wallet.service.WalletService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.validation.Valid;
 
@@ -24,10 +28,15 @@ import jakarta.validation.Valid;
 public class WalletController {
     private final WalletService service;
     private final DepositService depositService;
+    private final IdempotencyService idempotencyService;
+    private final ObjectMapper objectMapper;
 
-    public WalletController(WalletService service, DepositService depositService) {
+    public WalletController(WalletService service, DepositService depositService,
+                             IdempotencyService idempotencyService, ObjectMapper objectMapper) {
         this.service = service;
         this.depositService = depositService;
+        this.idempotencyService = idempotencyService;
+        this.objectMapper = objectMapper;
     }
 
     // Authentication.getName() is the JWT subject = user ID.
@@ -46,8 +55,31 @@ public class WalletController {
     @PostMapping("/{walletId}/deposits")
     public WalletResponse deposit(
         @PathVariable UUID walletId,
+        @RequestHeader("Idempotency-Key") String idempotencyKey,
         @RequestBody @Valid DepositRequest request,
-        Authentication auth) {
-        return WalletResponse.from(depositService.deposit(walletId, auth.getName(), request.amount()));
+        Authentication auth) throws JsonProcessingException {
+        String userId = auth.getName();
+
+        var cached = idempotencyService.begin(userId, idempotencyKey, request);
+        if (cached.isPresent()) {
+            return objectMapper.readValue(cached.get(), WalletResponse.class);
+        }
+
+        WalletResponse response;
+        try {
+            response = WalletResponse.from(depositService.deposit(walletId, userId, request.amount()));
+        } catch (RuntimeException e) {
+            // The deposit itself never happened -- safe to free the key for a fresh retry.
+            idempotencyService.abandon(userId, idempotencyKey);
+            throw e;
+        }
+
+        // The deposit already committed by this point. If recording that fails, do NOT abandon()
+        // -- deleting the key here would let a retry run depositService.deposit(...) a second
+        // time for money that already moved. Left IN_PROGRESS: retries get 409 until this is
+        // resolved manually, which is safer than silently risking a double deposit. (A production
+        // system would want a TTL/expiry + alerting for this case rather than a permanent stall.)
+        idempotencyService.complete(userId, idempotencyKey, objectMapper.writeValueAsString(response));
+        return response;
     }
 }
