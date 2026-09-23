@@ -1,7 +1,6 @@
 package com.example.wallet.service;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -9,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
@@ -36,8 +36,8 @@ class PaymentProcessorTest {
 
     @Test
     void gatewaySuccessMarksTransactionCompleted() {
-        when(restClient.post().uri(anyString()).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
-                .thenReturn(new PaymentResponse(txnId, TransactionStatus.COMPLETED));
+        when(restClient.post().uri(any(Function.class)).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
+                .thenReturn(new PaymentResponse(txnId, walletId, TransactionStatus.COMPLETED));
 
         processor.processPaymentAsync(txnId, walletId, userId, amount);
 
@@ -47,7 +47,7 @@ class PaymentProcessorTest {
 
     @Test
     void gatewayFailureMarksTransactionFailedAndRevertsDeposit() {
-        when(restClient.post().uri(anyString()).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
+        when(restClient.post().uri(any(Function.class)).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
                 .thenThrow(new RuntimeException("gateway unreachable"));
 
         processor.processPaymentAsync(txnId, walletId, userId, amount);

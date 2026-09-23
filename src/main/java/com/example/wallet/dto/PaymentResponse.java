@@ -5,5 +5,6 @@ import com.example.wallet.entity.TransactionStatus;
 
 public record PaymentResponse (
     UUID txnId,
+    UUID walletId,
     TransactionStatus transactionStatus
 ) {}

@@ -28,33 +28,6 @@ public class DepositService {
         UUID txnId = transactionService.insert(walletId, amount);
 
         paymentProcessor.processPaymentAsync(txnId, walletId, userId, amount);
-
-        // // Call payment service
-        // paymentWebClient.post().
-        //     uri("/deposits").
-        //     bodyValue(new PaymentRequest(walletId, amount, "USD")).
-        //     retrieve().
-        //     bodyToMono(PaymentResponse.class).
-        //     timeout(Duration.ofSeconds(10)).
-        //     doOnSuccess(response -> {
-        //         /*
-        //         Triggers when payment succeeds
-        //         Modify transaction row to be completed
-        //          */
-        //         System.out.println("Payment processed successfully: " + response.transactionStatus());
-        //         transactionService.insertTransactionStatus(txnId, TransactionStatus.COMPLETED);
-                
-        //     })
-        //     .doOnError(error -> {
-        //         /*
-        //         Triggers when payment fails
-        //         1. Modify transaction row to be failed
-        //         2. Deduct amount from balance
-        //         */
-        //         System.err.println("Payment failed: " + error.getMessage());
-        //         transactionService.insertTransactionStatus(txnId, TransactionStatus.FAILED);
-        //         walletService.revertDeposit(walletId, userId, amount);
-        //     });
         
         return wallet;
     }

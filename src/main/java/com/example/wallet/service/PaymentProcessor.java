@@ -37,9 +37,9 @@ public class PaymentProcessor {
 
         try {
             PaymentResponse response = paymentRestClient.post()
-                    .uri("/deposits")
+                    .uri(uriBuilder -> uriBuilder.path("/deposits").queryParam("txnId", txnId).build())
                     .body(new PaymentRequest(
-                            txnId,
+                            walletId,
                             amount,
                             "USD"
                     ))
