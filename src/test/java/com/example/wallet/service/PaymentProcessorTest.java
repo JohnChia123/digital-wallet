@@ -2,6 +2,7 @@ package com.example.wallet.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -10,8 +11,8 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.util.UUID;
-import java.util.function.Function;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
 import org.springframework.web.client.RestClient;
@@ -27,6 +28,13 @@ import com.example.wallet.entity.TransactionStatus;
  */
 class PaymentProcessorTest {
     private final RestClient restClient = mock(RestClient.class, Answers.RETURNS_DEEP_STUBS);
+    // RequestHeadersSpec<S extends RequestHeadersSpec<S>> is a self-bounded generic -- Mockito's
+    // deep stubs can't reliably synthesize a mock for .headers(...)'s return type from that (it
+    // works fine for .uri(Function<UriBuilder,URI>), whose return type resolves to a concrete
+    // interface via the sub-interface's own `extends UriSpec<RequestBodySpec>` clause, a simpler
+    // case for reflection). Wiring this one hop explicitly sidesteps the limitation; everything
+    // else still goes through restClient's automatic deep stubs.
+    private final RestClient.RequestBodySpec bodySpec = mock(RestClient.RequestBodySpec.class, Answers.RETURNS_DEEP_STUBS);
     private final TransactionService transactionService = mock(TransactionService.class);
     private final PaymentProcessor processor = new PaymentProcessor(restClient, transactionService);
 
@@ -35,9 +43,15 @@ class PaymentProcessorTest {
     private final String userId = "alice";
     private final BigDecimal amount = new BigDecimal("50.00");
 
+    @BeforeEach
+    void wireHeadersHop() {
+        when(restClient.post().uri(anyString())).thenReturn(bodySpec);
+        when(bodySpec.headers(any())).thenReturn(bodySpec);
+    }
+
     @Test
     void gatewaySuccessMarksTransactionCompleted() {
-        when(restClient.post().uri(any(Function.class)).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
+        when(bodySpec.body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
                 .thenReturn(new PaymentResponse(txnId, walletId, TransactionStatus.COMPLETED));
 
         processor.processDepositAsync(txnId, walletId, userId, amount);
@@ -48,7 +62,7 @@ class PaymentProcessorTest {
 
     @Test
     void gatewayFailureMarksTransactionFailedAndRevertsDeposit() {
-        when(restClient.post().uri(any(Function.class)).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
+        when(bodySpec.body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
                 .thenThrow(new RuntimeException("gateway unreachable"));
 
         processor.processDepositAsync(txnId, walletId, userId, amount);
@@ -64,7 +78,7 @@ class PaymentProcessorTest {
      */
     @Test
     void confirmPaymentFailingAfterGatewaySuccessDoesNotTriggerFailPayment() {
-        when(restClient.post().uri(any(Function.class)).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
+        when(bodySpec.body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
                 .thenReturn(new PaymentResponse(txnId, walletId, TransactionStatus.COMPLETED));
         doThrow(new RuntimeException("db blip")).when(transactionService)
                 .confirmPayment(txnId, walletId, userId, amount);

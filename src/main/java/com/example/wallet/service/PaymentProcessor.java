@@ -34,7 +34,8 @@ public class PaymentProcessor {
         PaymentResponse response;
         try {
             response = paymentRestClient.post()
-                    .uri(uriBuilder -> uriBuilder.path("/deposits").queryParam("txnId", txnId).build())
+                    .uri("/deposits")
+                    .headers(h -> h.set("Idempotency-Key", txnId.toString()))
                     .body(new PaymentRequest(
                             walletId,
                             amount,
@@ -80,7 +81,8 @@ public class PaymentProcessor {
         PaymentResponse response;
         try {
             response = paymentRestClient.post()
-                    .uri(uriBuilder -> uriBuilder.path("/withdraws").queryParam("txnId", txnId).build())
+                    .uri("/withdraws")
+                    .headers(h -> h.set("Idempotency-Key", txnId.toString()))
                     .body(new PaymentRequest(
                             walletId,
                             amount,

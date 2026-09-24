@@ -4,13 +4,13 @@ import java.util.UUID;
 
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.wallet.dto.PaymentRequest;
 import com.example.wallet.dto.PaymentResponse;
-import com.example.wallet.entity.TransactionStatus;
+import com.example.wallet.service.MockGatewayService;
 
 import jakarta.validation.Valid;
 
@@ -18,11 +18,16 @@ import jakarta.validation.Valid;
 @RestController
 @RequestMapping("/withdraws")
 public class MockWithdrawalController {
+    private final MockGatewayService gateway;
+
+    public MockWithdrawalController(MockGatewayService gateway) {
+        this.gateway = gateway;
+    }
 
     @PostMapping
     public PaymentResponse withdrawMoney(
-            @RequestParam(required = true) UUID txnId,
+            @RequestHeader("Idempotency-Key") UUID txnId,
             @RequestBody @Valid PaymentRequest paymentRequest) {
-        return new PaymentResponse(txnId, paymentRequest.walletId(), TransactionStatus.COMPLETED);
+        return gateway.process(txnId, paymentRequest.walletId(), paymentRequest.amount());
     }
 }
