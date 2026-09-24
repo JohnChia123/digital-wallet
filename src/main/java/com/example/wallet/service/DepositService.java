@@ -5,7 +5,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
-import com.example.wallet.entity.Wallet;
+import com.example.wallet.entity.Transaction;
 
 @Service
 public class DepositService {
@@ -18,17 +18,13 @@ public class DepositService {
         this.transactionService = transactionService;
         this.paymentProcessor = paymentProcessor;
     }
-    /*
-    POST /mock-payments/withdrawals
-    GET  /mock-payments/withdrawals/{paymentId}
-    GET  /mock-payments/withdrawals/by-idempotency-key/{key}
-     */
-    public Wallet deposit(UUID walletId, String userId, BigDecimal amount) {
-        Wallet wallet = walletService.deposit(walletId, userId, amount);
-        UUID txnId = transactionService.insert(walletId, amount);
 
-        paymentProcessor.processPaymentAsync(txnId, walletId, userId, amount);
-        
-        return wallet;
+    public Transaction deposit(UUID walletId, String userId, BigDecimal amount) {
+        walletService.deposit(walletId, userId, amount);
+        Transaction txn = transactionService.insert(walletId, amount);
+
+        paymentProcessor.processPaymentAsync(txn.getId(), walletId, userId, amount);
+
+        return txn;
     }
 }

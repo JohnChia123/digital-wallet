@@ -1,6 +1,8 @@
 package com.example.wallet.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -26,8 +28,7 @@ import com.example.wallet.entity.TransactionStatus;
 class PaymentProcessorTest {
     private final RestClient restClient = mock(RestClient.class, Answers.RETURNS_DEEP_STUBS);
     private final TransactionService transactionService = mock(TransactionService.class);
-    private final WalletService walletService = mock(WalletService.class);
-    private final PaymentProcessor processor = new PaymentProcessor(restClient, transactionService, walletService);
+    private final PaymentProcessor processor = new PaymentProcessor(restClient, transactionService);
 
     private final UUID txnId = UUID.randomUUID();
     private final UUID walletId = UUID.randomUUID();
@@ -41,8 +42,8 @@ class PaymentProcessorTest {
 
         processor.processPaymentAsync(txnId, walletId, userId, amount);
 
-        verify(transactionService).insertTransactionStatus(txnId, TransactionStatus.COMPLETED);
-        verify(walletService, never()).revertDeposit(any(), any(), any());
+        verify(transactionService).confirmPayment(txnId, walletId, userId, amount);
+        verify(transactionService, never()).failPayment(any(), any(), any(), any());
     }
 
     @Test
@@ -52,7 +53,29 @@ class PaymentProcessorTest {
 
         processor.processPaymentAsync(txnId, walletId, userId, amount);
 
-        verify(transactionService).insertTransactionStatus(txnId, TransactionStatus.FAILED);
-        verify(walletService).revertDeposit(walletId, userId, amount);
+        verify(transactionService).failPayment(txnId, walletId, userId, amount);
+        verify(transactionService, never()).confirmPayment(any(), any(), any(), any());
+    }
+
+    /**
+     * Regression test for the bug where a broad catch treated "bookkeeping failed after the
+     * gateway already succeeded" the same as "the gateway itself failed" -- which would have
+     * incorrectly reversed a deposit that genuinely went through.
+     */
+    @Test
+    void confirmPaymentFailingAfterGatewaySuccessDoesNotTriggerFailPayment() {
+        when(restClient.post().uri(any(Function.class)).body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
+                .thenReturn(new PaymentResponse(txnId, walletId, TransactionStatus.COMPLETED));
+        doThrow(new RuntimeException("db blip")).when(transactionService)
+                .confirmPayment(txnId, walletId, userId, amount);
+
+        // confirmPayment throwing propagates out of processPaymentAsync uncovered -- in production
+        // that lands in Spring's SimpleAsyncUncaughtExceptionHandler (an @Async void method can't
+        // hand the exception back to a caller). What this test actually asserts is what must NOT
+        // happen: failPayment must never run, since that would wrongly reverse a real deposit.
+        assertThatThrownBy(() -> processor.processPaymentAsync(txnId, walletId, userId, amount))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(transactionService, never()).failPayment(any(), any(), any(), any());
     }
 }

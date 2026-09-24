@@ -351,7 +351,9 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-              "pm.test(\"balance credited\", () => pm.expect(pm.response.json().balance).to.eql(100));"
+              "pm.test(\"transaction is PENDING for the newly created deposit\", () => pm.expect(pm.response.json().status).to.eql(\"PENDING\"));",
+              "pm.test(\"type is DEPOSIT\", () => pm.expect(pm.response.json().type).to.eql(\"DEPOSIT\"));",
+              "pm.test(\"amount matches\", () => pm.expect(pm.response.json().amount).to.eql(100));"
             ]
           }
         }
@@ -964,7 +966,7 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-              "pm.test(\"balance unchanged from request 9\", () => pm.expect(pm.response.json().balance).to.eql(100));"
+              "pm.test(\"amount unchanged from request 9\", () => pm.expect(pm.response.json().amount).to.eql(100));"
             ]
           }
         }

@@ -65,20 +65,43 @@ public class TransactionService {
     }
 
     @Transactional
-    public UUID insert(UUID walletId, BigDecimal amount) {
+    public Transaction insert(UUID walletId, BigDecimal amount) {
         Transaction txn = new Transaction(walletId, TransactionType.DEPOSIT, amount, TransactionStatus.PENDING, null, Instant.now());
-        txnRepo.save(txn);
-        return txn.getId();
+        return txnRepo.save(txn);
     }
 
-    @Transactional 
+    @Transactional
     public void insertTransactionStatus(UUID txnId, TransactionStatus txnStatus) {
         Transaction txn = txnRepo.getReferenceById(txnId);
-        if ( txn.getStatus() == TransactionStatus.COMPLETED || 
+        if ( txn.getStatus() == TransactionStatus.COMPLETED ||
             txn.getStatus() == TransactionStatus.FAILED) {
                 return;
         }
         txn.setStatus(txnStatus);
         txnRepo.save(txn);
+    }
+
+    /**
+     * Marks the transaction COMPLETED and releases the wallet's reserved hold atomically -- both
+     * land or neither does, so the transaction's recorded status and the wallet's reserved amount
+     * can never disagree with each other. Only call this after the gateway has already confirmed
+     * success; if this throws, the caller must NOT treat that as a gateway failure (nothing here
+     * should trigger failPayment -- the payment genuinely succeeded, only the bookkeeping about it
+     * failed).
+     */
+    @Transactional
+    public void confirmPayment(UUID txnId, UUID walletId, String userId, BigDecimal amount) {
+        insertTransactionStatus(txnId, TransactionStatus.COMPLETED);
+        wallets.confirmDeposit(walletId, userId, amount);
+    }
+
+    /**
+     * Marks the transaction FAILED and reverses the deposit atomically -- same reasoning as
+     * confirmPayment. Only call this when the gateway call itself is what failed.
+     */
+    @Transactional
+    public void failPayment(UUID txnId, UUID walletId, String userId, BigDecimal amount) {
+        insertTransactionStatus(txnId, TransactionStatus.FAILED);
+        wallets.revertDeposit(walletId, userId, amount);
     }
 }

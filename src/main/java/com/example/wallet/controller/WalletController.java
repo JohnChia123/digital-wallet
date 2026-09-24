@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.wallet.dto.DepositRequest;
+import com.example.wallet.dto.TransactionResponse;
 import com.example.wallet.dto.WalletResponse;
 import com.example.wallet.service.DepositService;
 import com.example.wallet.service.IdempotencyService;
@@ -53,7 +54,7 @@ public class WalletController {
     }
 
     @PostMapping("/{walletId}/deposits")
-    public WalletResponse deposit(
+    public TransactionResponse deposit(
         @PathVariable UUID walletId,
         @RequestHeader("Idempotency-Key") String idempotencyKey,
         @RequestBody @Valid DepositRequest request,
@@ -62,12 +63,12 @@ public class WalletController {
 
         var cached = idempotencyService.begin(userId, idempotencyKey, request);
         if (cached.isPresent()) {
-            return objectMapper.readValue(cached.get(), WalletResponse.class);
+            return objectMapper.readValue(cached.get(), TransactionResponse.class);
         }
 
-        WalletResponse response;
+        TransactionResponse response;
         try {
-            response = WalletResponse.from(depositService.deposit(walletId, userId, request.amount()));
+            response = TransactionResponse.from(depositService.deposit(walletId, userId, request.amount()));
         } catch (RuntimeException e) {
             // The deposit itself never happened -- safe to free the key for a fresh retry.
             idempotencyService.abandon(userId, idempotencyKey);

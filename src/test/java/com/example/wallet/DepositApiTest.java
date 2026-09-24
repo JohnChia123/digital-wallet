@@ -86,11 +86,16 @@ class DepositApiTest {
     }
 
     @Test
-    void depositCreditsBalanceImmediately() throws Exception {
+    void depositCreditsBalanceImmediatelyAndReturnsPendingTransaction() throws Exception {
         deposit("alice", "dep-1", "{\"amount\": 100.00}")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.walletId").value(wallet.getId().toString()))
-                .andExpect(jsonPath("$.balance").value(100.00));
+                .andExpect(jsonPath("$.transactionId").exists())
+                .andExpect(jsonPath("$.type").value("DEPOSIT"))
+                .andExpect(jsonPath("$.amount").value(100.00))
+                .andExpect(jsonPath("$.status").value("PENDING")); // gateway hasn't responded yet
+
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("100.00")); // credited immediately regardless
     }
 
     @Test

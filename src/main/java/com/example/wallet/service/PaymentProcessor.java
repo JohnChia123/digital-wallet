@@ -9,23 +9,19 @@ import org.springframework.web.client.RestClient;
 
 import com.example.wallet.dto.PaymentRequest;
 import com.example.wallet.dto.PaymentResponse;
-import com.example.wallet.entity.TransactionStatus;
 
 @Service
 public class PaymentProcessor {
 
     private final RestClient paymentRestClient;
     private final TransactionService transactionService;
-    private final WalletService walletService;
 
     public PaymentProcessor(
             RestClient paymentRestClient,
-            TransactionService transactionService,
-            WalletService walletService) {
+            TransactionService transactionService) {
 
         this.paymentRestClient = paymentRestClient;
         this.transactionService = transactionService;
-        this.walletService = walletService;
     }
 
     @Async
@@ -35,8 +31,9 @@ public class PaymentProcessor {
             String userId,
             BigDecimal amount) {
 
+        PaymentResponse response;
         try {
-            PaymentResponse response = paymentRestClient.post()
+            response = paymentRestClient.post()
                     .uri(uriBuilder -> uriBuilder.path("/deposits").queryParam("txnId", txnId).build())
                     .body(new PaymentRequest(
                             walletId,
@@ -45,38 +42,21 @@ public class PaymentProcessor {
                     ))
                     .retrieve()
                     .body(PaymentResponse.class);
-
-            System.out.println(
-                    "Payment succeeded: " + response.transactionStatus()
-            );
-
-            transactionService.insertTransactionStatus(
-                    txnId,
-                    TransactionStatus.COMPLETED
-            );
-            
-            walletService.confirmDeposit(
-                    walletId,
-                    userId,
-                    amount
-            );
-
         } catch (Exception e) {
-
+            // Only the gateway call itself failing lands here -- safe to mark FAILED and reverse.
             System.err.println(
                     "Payment failed: " + e.getMessage()
             );
-
-            transactionService.insertTransactionStatus(
-                    txnId,
-                    TransactionStatus.FAILED
-            );
-
-            walletService.revertDeposit(
-                    walletId,
-                    userId,
-                    amount
-            );
+            transactionService.failPayment(txnId, walletId, userId, amount);
+            return;
         }
+
+        // The gateway already confirmed success by this point. If confirmPayment throws, that
+        // must NOT be treated as a gateway failure -- the payment genuinely went through; only
+        // the bookkeeping about it failed. So this is deliberately outside the try/catch above.
+        System.out.println(
+                "Payment succeeded: " + response.transactionStatus()
+        );
+        transactionService.confirmPayment(txnId, walletId, userId, amount);
     }
 }
