@@ -45,6 +45,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", e.getMessage()));
     }
 
+    @ExceptionHandler(InsufficientBalanceException.class)
+    ResponseEntity<ErrorResponse> insufficientBalance(InsufficientBalanceException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(new ErrorResponse("INSUFFICIENT_BALANCE", e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidOtpException.class)
+    ResponseEntity<ErrorResponse> invalidOtp(InvalidOtpException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_OTP", e.getMessage()));
+    }
+
+    @ExceptionHandler(WalletNotActiveException.class)
+    ResponseEntity<ErrorResponse> walletNotActive(WalletNotActiveException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("WALLET_NOT_ACTIVE", e.getMessage()));
+    }
+
     @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
     ResponseEntity<ErrorResponse> badRequest() {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", "Invalid request"));

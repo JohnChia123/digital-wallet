@@ -65,9 +65,34 @@ public class TransactionService {
     }
 
     @Transactional
-    public Transaction insert(UUID walletId, BigDecimal amount) {
-        Transaction txn = new Transaction(walletId, TransactionType.DEPOSIT, amount, TransactionStatus.PENDING, null, Instant.now());
+    public Transaction insert(UUID walletId, TransactionType type, BigDecimal amount) {
+        Transaction txn = new Transaction(walletId, type, amount, TransactionStatus.PENDING, null, Instant.now());
         return txnRepo.save(txn);
+    }
+
+    /**
+     * Locks the wallet, validates and debits it, and inserts the PENDING transaction row -- all in
+     * one database transaction, per the skill's withdrawal flow (lock -> validate -> debit ->
+     * insert, one BEGIN/COMMIT). Unlike the deposit path, this can't be split into two separate
+     * calls without risking a debited wallet with no transaction row to show for it.
+     */
+    @Transactional
+    public Transaction initiateWithdrawal(UUID walletId, String userId, BigDecimal amount) {
+        wallets.withdraw(walletId, userId, amount);
+        return insert(walletId, TransactionType.WITHDRAWAL, amount);
+    }
+
+    /** Withdrawal success: just the status flip -- the debit already happened and isn't reversed. */
+    @Transactional
+    public void confirmWithdrawal(UUID txnId) {
+        insertTransactionStatus(txnId, TransactionStatus.COMPLETED);
+    }
+
+    /** Withdrawal definite failure: mark FAILED and refund the debit, atomically. */
+    @Transactional
+    public void failWithdrawal(UUID txnId, UUID walletId, String userId, BigDecimal amount) {
+        insertTransactionStatus(txnId, TransactionStatus.FAILED);
+        wallets.refundWithdrawal(walletId, userId, amount);
     }
 
     @Transactional

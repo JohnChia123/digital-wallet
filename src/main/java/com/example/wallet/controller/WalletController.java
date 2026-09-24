@@ -16,9 +16,11 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.wallet.dto.DepositRequest;
 import com.example.wallet.dto.TransactionResponse;
 import com.example.wallet.dto.WalletResponse;
+import com.example.wallet.dto.WithdrawalRequest;
 import com.example.wallet.service.DepositService;
 import com.example.wallet.service.IdempotencyService;
 import com.example.wallet.service.WalletService;
+import com.example.wallet.service.WithdrawalService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -29,13 +31,15 @@ import jakarta.validation.Valid;
 public class WalletController {
     private final WalletService service;
     private final DepositService depositService;
+    private final WithdrawalService withdrawalService;
     private final IdempotencyService idempotencyService;
     private final ObjectMapper objectMapper;
 
-    public WalletController(WalletService service, DepositService depositService,
+    public WalletController(WalletService service, DepositService depositService, WithdrawalService withdrawalService,
                              IdempotencyService idempotencyService, ObjectMapper objectMapper) {
         this.service = service;
         this.depositService = depositService;
+        this.withdrawalService = withdrawalService;
         this.idempotencyService = idempotencyService;
         this.objectMapper = objectMapper;
     }
@@ -82,5 +86,15 @@ public class WalletController {
         // system would want a TTL/expiry + alerting for this case rather than a permanent stall.)
         idempotencyService.complete(userId, idempotencyKey, objectMapper.writeValueAsString(response));
         return response;
+    }
+
+    // No Idempotency-Key yet -- deferred, same as the rest of 3c.
+    @PostMapping("/{walletId}/withdrawals")
+    public TransactionResponse withdraw(
+        @PathVariable UUID walletId,
+        @RequestBody @Valid WithdrawalRequest request,
+        Authentication auth) {
+        return TransactionResponse.from(
+                withdrawalService.withdraw(walletId, auth.getName(), request.amount(), request.otp()));
     }
 }

@@ -25,7 +25,7 @@ public class PaymentProcessor {
     }
 
     @Async
-    public void processPaymentAsync(
+    public void processDepositAsync(
             UUID txnId,
             UUID walletId,
             String userId,
@@ -58,5 +58,47 @@ public class PaymentProcessor {
                 "Payment succeeded: " + response.transactionStatus()
         );
         transactionService.confirmPayment(txnId, walletId, userId, amount);
+    }
+
+    /**
+     * Withdrawal's money already moved (debited) before this runs, in the opposite direction from
+     * deposit -- so success needs no wallet touch (confirmWithdrawal), and failure needs a refund
+     * (failWithdrawal), not a debit reversal. Same try/catch shape and same reasoning as
+     * processDepositAsync for why the post-gateway-success call sits outside the try/catch.
+     *
+     * No timeout/definite-failure distinction yet -- every exception here is treated as a definite
+     * failure and compensated immediately, which the skill explicitly warns against for
+     * withdrawals. That's deferred to 3f along with retries.
+     */
+    @Async
+    public void processWithdrawAsync(
+            UUID txnId,
+            UUID walletId,
+            String userId,
+            BigDecimal amount) {
+
+        PaymentResponse response;
+        try {
+            response = paymentRestClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/withdraws").queryParam("txnId", txnId).build())
+                    .body(new PaymentRequest(
+                            walletId,
+                            amount,
+                            "USD"
+                    ))
+                    .retrieve()
+                    .body(PaymentResponse.class);
+        } catch (Exception e) {
+            System.err.println(
+                    "Withdrawal failed: " + e.getMessage()
+            );
+            transactionService.failWithdrawal(txnId, walletId, userId, amount);
+            return;
+        }
+
+        System.out.println(
+                "Withdrawal succeeded: " + response.transactionStatus()
+        );
+        transactionService.confirmWithdrawal(txnId);
     }
 }

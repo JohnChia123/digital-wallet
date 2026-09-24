@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 import com.example.wallet.entity.Transaction;
+import com.example.wallet.entity.TransactionType;
 
 @Service
 public class DepositService {
@@ -21,9 +22,9 @@ public class DepositService {
 
     public Transaction deposit(UUID walletId, String userId, BigDecimal amount) {
         walletService.deposit(walletId, userId, amount);
-        Transaction txn = transactionService.insert(walletId, amount);
+        Transaction txn = transactionService.insert(walletId, TransactionType.DEPOSIT, amount);
 
-        paymentProcessor.processPaymentAsync(txn.getId(), walletId, userId, amount);
+        paymentProcessor.processDepositAsync(txn.getId(), walletId, userId, amount);
 
         return txn;
     }
