@@ -88,13 +88,33 @@ public class WalletController {
         return response;
     }
 
-    // No Idempotency-Key yet -- deferred, same as the rest of 3c.
     @PostMapping("/{walletId}/withdrawals")
     public TransactionResponse withdraw(
         @PathVariable UUID walletId,
+        @RequestHeader("Idempotency-Key") String idempotencyKey,
         @RequestBody @Valid WithdrawalRequest request,
-        Authentication auth) {
-        return TransactionResponse.from(
-                withdrawalService.withdraw(walletId, auth.getName(), request.amount(), request.otp()));
+        Authentication auth) throws JsonProcessingException {
+        String userId = auth.getName();
+
+        var cached = idempotencyService.begin(userId, idempotencyKey, request);
+        if (cached.isPresent()) {
+            return objectMapper.readValue(cached.get(), TransactionResponse.class);
+        }
+
+        TransactionResponse response;
+        try {
+            response = TransactionResponse.from(
+                    withdrawalService.withdraw(walletId, userId, request.amount(), request.otp()));
+        } catch (RuntimeException e) {
+            // The withdrawal itself never happened -- safe to free the key for a fresh retry.
+            idempotencyService.abandon(userId, idempotencyKey);
+            throw e;
+        }
+
+        // Same reasoning as deposit: the withdrawal already committed (debited) by this point, so
+        // a failure here must NOT abandon() -- that would let a retry debit the wallet a second
+        // time for money that's already moved. Left IN_PROGRESS on failure to record.
+        idempotencyService.complete(userId, idempotencyKey, objectMapper.writeValueAsString(response));
+        return response;
     }
 }

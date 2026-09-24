@@ -81,16 +81,17 @@ class WithdrawalApiTest {
         return jwt().jwt(j -> j.subject(user));
     }
 
-    private ResultActions withdraw(String user, String body) throws Exception {
+    private ResultActions withdraw(String user, String idempotencyKey, String body) throws Exception {
         return mvc.perform(post("/wallets/" + wallet.getId() + "/withdrawals")
                 .with(as(user))
+                .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
     }
 
     @Test
     void withdrawalDebitsBalanceImmediatelyAndReturnsPendingTransaction() throws Exception {
-        withdraw("alice", "{\"amount\": 40.00, \"otp\": \"123456\"}")
+        withdraw("alice", "wd-1", "{\"amount\": 40.00, \"otp\": \"123456\"}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").exists())
                 .andExpect(jsonPath("$.type").value("WITHDRAWAL"))
@@ -103,7 +104,7 @@ class WithdrawalApiTest {
 
     @Test
     void withdrawalEventuallySettlesCompleted() throws Exception {
-        withdraw("alice", "{\"amount\": 40.00, \"otp\": \"123456\"}").andExpect(status().isOk());
+        withdraw("alice", "wd-2", "{\"amount\": 40.00, \"otp\": \"123456\"}").andExpect(status().isOk());
 
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             Transaction txn = transactions.findAll().stream()
@@ -118,7 +119,7 @@ class WithdrawalApiTest {
 
     @Test
     void insufficientBalanceRejected() throws Exception {
-        withdraw("alice", "{\"amount\": 150.00, \"otp\": \"123456\"}")
+        withdraw("alice", "wd-3", "{\"amount\": 150.00, \"otp\": \"123456\"}")
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_BALANCE"));
         assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
@@ -135,7 +136,7 @@ class WithdrawalApiTest {
     void withdrawalBlockedByPendingDepositCannotExceedAvailableBalance() throws Exception {
         jdbc.update("UPDATE wallets SET reserved = 30.00 WHERE id = ?", wallet.getId());
 
-        withdraw("alice", "{\"amount\": 80.00, \"otp\": \"123456\"}") // > available (100 - 30 = 70)
+        withdraw("alice", "wd-4", "{\"amount\": 80.00, \"otp\": \"123456\"}") // > available (100 - 30 = 70)
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_BALANCE"));
         assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
@@ -146,7 +147,7 @@ class WithdrawalApiTest {
     void withdrawalAllowedUpToAvailableBalanceWithPendingDeposit() throws Exception {
         jdbc.update("UPDATE wallets SET reserved = 30.00 WHERE id = ?", wallet.getId());
 
-        withdraw("alice", "{\"amount\": 70.00, \"otp\": \"123456\"}") // == available (100 - 30)
+        withdraw("alice", "wd-5", "{\"amount\": 70.00, \"otp\": \"123456\"}") // == available (100 - 30)
                 .andExpect(status().isOk());
         assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
                 .isEqualByComparingTo(new BigDecimal("30.00")); // the reserved $30 is still intact
@@ -154,7 +155,7 @@ class WithdrawalApiTest {
 
     @Test
     void invalidOtpRejected() throws Exception {
-        withdraw("alice", "{\"amount\": 40.00, \"otp\": \"000000\"}")
+        withdraw("alice", "wd-6", "{\"amount\": 40.00, \"otp\": \"000000\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_OTP"));
         assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
@@ -164,22 +165,33 @@ class WithdrawalApiTest {
     @Test
     void inactiveWalletRejected() throws Exception {
         jdbc.update("UPDATE wallets SET status = 'SUSPENDED' WHERE id = ?", wallet.getId());
-        withdraw("alice", "{\"amount\": 40.00, \"otp\": \"123456\"}")
+        withdraw("alice", "wd-7", "{\"amount\": 40.00, \"otp\": \"123456\"}")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("WALLET_NOT_ACTIVE"));
     }
 
     @Test
     void withdrawalFromAnotherUsersWalletReturns404() throws Exception {
-        withdraw("mallory", "{\"amount\": 40.00, \"otp\": \"123456\"}").andExpect(status().isNotFound());
+        withdraw("mallory", "wd-8", "{\"amount\": 40.00, \"otp\": \"123456\"}").andExpect(status().isNotFound());
     }
 
     @Test
     void withdrawalWithoutAuthReturns401() throws Exception {
         mvc.perform(post("/wallets/" + wallet.getId() + "/withdrawals")
+                        .header("Idempotency-Key", "wd-9")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\": 40.00, \"otp\": \"123456\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void missingIdempotencyKeyRejected() throws Exception {
+        mvc.perform(post("/wallets/" + wallet.getId() + "/withdrawals")
+                        .with(as("alice"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\": 40.00, \"otp\": \"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
     }
 
     /**
@@ -187,6 +199,9 @@ class WithdrawalApiTest {
      * withdrawals -- only one may succeed, the wallet must never go negative. The row lock in
      * WalletRepository.findByIdForUpdate is what's actually being tested here, not application
      * logic -- a check-then-act without it would let both through.
+     *
+     * Deliberately two DIFFERENT idempotency keys: this models two genuinely separate withdrawal
+     * attempts racing, not one attempt being retried (that's concurrentDuplicateRequestsBelow).
      */
     @Test
     void concurrentWithdrawalsCannotOverdraw() throws Exception {
@@ -195,9 +210,10 @@ class WithdrawalApiTest {
         CountDownLatch start = new CountDownLatch(1);
         var results = new java.util.ArrayList<Future<Integer>>();
         for (int i = 0; i < n; i++) {
+            String key = "wd-concurrent-" + i;
             results.add(pool.submit(() -> {
                 start.await();
-                return withdraw("alice", "{\"amount\": 80.00, \"otp\": \"123456\"}")
+                return withdraw("alice", key, "{\"amount\": 80.00, \"otp\": \"123456\"}")
                         .andReturn().getResponse().getStatus();
             }));
         }
@@ -213,5 +229,61 @@ class WithdrawalApiTest {
         assertThat(okCount).isEqualTo(1);
         BigDecimal finalBalance = wallets.findById(wallet.getId()).orElseThrow().getBalance();
         assertThat(finalBalance).isEqualByComparingTo(new BigDecimal("20.00")); // never negative
+    }
+
+    // --- Idempotency (3c), same pattern as DepositApiTest ---
+
+    @Test
+    void duplicateIdempotencyKeySameRequestReturnsOriginalResponseAndDebitsOnce() throws Exception {
+        String first = withdraw("alice", "wd-retry", "{\"amount\": 40.00, \"otp\": \"123456\"}")
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String second = withdraw("alice", "wd-retry", "{\"amount\": 40.00, \"otp\": \"123456\"}")
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        assertThat(second).isEqualTo(first);
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("60.00")); // not 20 -- only debited once
+        assertThat(transactions.findAll().stream().filter(t -> t.getWalletId().equals(wallet.getId())).count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void sameIdempotencyKeyDifferentRequestRejected() throws Exception {
+        withdraw("alice", "wd-mismatch", "{\"amount\": 40.00, \"otp\": \"123456\"}").andExpect(status().isOk());
+        withdraw("alice", "wd-mismatch", "{\"amount\": 50.00, \"otp\": \"123456\"}")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"));
+
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("60.00")); // only the first request applied
+    }
+
+    @Test
+    void concurrentDuplicateRequestsDebitOnlyOnce() throws Exception {
+        int n = 8;
+        var pool = Executors.newFixedThreadPool(n);
+        var start = new CountDownLatch(1);
+        var results = new java.util.ArrayList<Future<Integer>>();
+        for (int i = 0; i < n; i++) {
+            results.add(pool.submit(() -> {
+                start.await();
+                return withdraw("alice", "wd-concurrent-dup", "{\"amount\": 40.00, \"otp\": \"123456\"}")
+                        .andReturn().getResponse().getStatus();
+            }));
+        }
+        start.countDown();
+        int okCount = 0;
+        for (var f : results) {
+            int status = f.get();
+            if (status == 200) okCount++;
+            else assertThat(status).isEqualTo(409); // IN_PROGRESS if it raced
+        }
+        pool.shutdown();
+
+        assertThat(okCount).isGreaterThanOrEqualTo(1);
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("60.00")); // debited once, not up to 8 times
+        assertThat(transactions.findAll().stream().filter(t -> t.getWalletId().equals(wallet.getId())).count())
+                .isEqualTo(1);
     }
 }
