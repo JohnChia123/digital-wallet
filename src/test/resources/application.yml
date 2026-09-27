@@ -5,6 +5,13 @@ wallet:
     # Fixed (not random) so it can equal server.port below without a @DynamicPropertySource.
     # Distinct from 8080 so this doesn't collide with a `mvn spring-boot:run` left running locally.
     base-url: http://localhost:9090
+  limits:
+    # Small, deliberately: comfortably above every amount the existing tests use (max ~150), but
+    # low enough that a dedicated test can exceed them without absurd numbers.
+    daily-deposit: 1000
+    weekly-deposit: 5000
+    daily-withdrawal: 1000
+    weekly-withdrawal: 5000
 
 # Only DepositApiTest actually starts a real listener (webEnvironment = DEFINED_PORT); everything
 # else uses MockMvc's mock dispatch, which ignores this.

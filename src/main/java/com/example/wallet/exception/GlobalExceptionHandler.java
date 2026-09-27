@@ -60,6 +60,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("WALLET_NOT_ACTIVE", e.getMessage()));
     }
 
+    @ExceptionHandler(TransactionLimitExceededException.class)
+    ResponseEntity<ErrorResponse> transactionLimitExceeded(TransactionLimitExceededException e) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(new ErrorResponse("TRANSACTION_LIMIT_EXCEEDED", e.getMessage()));
+    }
+
     @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
     ResponseEntity<ErrorResponse> badRequest() {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ErrorResponse("INVALID_REQUEST", "Invalid request"));

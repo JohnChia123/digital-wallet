@@ -14,6 +14,12 @@ wallet:
   payment:
     # The mock payment gateway lives in this same app; treat it as an external base URL anyway.
     base-url: ${PAYMENT_BASE_URL:http://localhost:8080}
+  limits:
+    # Never hardcoded -- read from the environment, per the skill's exact variable names.
+    daily-deposit: ${WALLET_DAILY_DEPOSIT_LIMIT:10000}
+    weekly-deposit: ${WALLET_WEEKLY_DEPOSIT_LIMIT:50000}
+    daily-withdrawal: ${WALLET_DAILY_WITHDRAWAL_LIMIT:5000}
+    weekly-withdrawal: ${WALLET_WEEKLY_WITHDRAWAL_LIMIT:20000}
 logging:
   level:
     org.springframework.security: DEBUG

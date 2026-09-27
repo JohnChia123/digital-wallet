@@ -8,7 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -83,6 +85,15 @@ class DepositApiTest {
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
+    }
+
+    /** Inserts a transaction directly, bypassing the API, so limit tests can set up prior totals
+     *  at specific points in time without depending on the async settle flow. */
+    private void seedTransaction(String type, String amount, String status, Instant createdAt) {
+        jdbc.update("INSERT INTO transactions (id, wallet_id, type, amount, status, external_reference, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+                UUID.randomUUID(), wallet.getId(), type, new BigDecimal(amount), status,
+                Timestamp.from(createdAt), Timestamp.from(createdAt));
     }
 
     @Test
@@ -212,5 +223,31 @@ class DepositApiTest {
                 .isEqualByComparingTo(new BigDecimal("100.00"));
         assertThat(transactions.findAll().stream().filter(t -> t.getWalletId().equals(wallet.getId())).count())
                 .isEqualTo(1);
+    }
+
+    // --- Iteration 3e: transaction limits (test config: daily-deposit=1000, weekly-deposit=5000) ---
+
+    @Test
+    void dailyDepositLimitExceededRejected() throws Exception {
+        seedTransaction("DEPOSIT", "950.00", "COMPLETED", Instant.now());
+
+        deposit("alice", "dep-limit-1", "{\"amount\": 100.00}") // 950 + 100 > 1000 daily limit
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("TRANSACTION_LIMIT_EXCEEDED"));
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(BigDecimal.ZERO); // rejected before crediting
+    }
+
+    @Test
+    void weeklyDepositLimitExceededRejected() throws Exception {
+        // Outside the daily window (>24h ago) but inside the weekly one -- isolates the weekly
+        // check specifically; this seeded transaction contributes 0 to the daily total.
+        seedTransaction("DEPOSIT", "4950.00", "COMPLETED", Instant.now().minus(Duration.ofDays(3)));
+
+        deposit("alice", "dep-limit-2", "{\"amount\": 100.00}") // 4950 + 100 > 5000 weekly limit
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("TRANSACTION_LIMIT_EXCEEDED"));
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(BigDecimal.ZERO);
     }
 }

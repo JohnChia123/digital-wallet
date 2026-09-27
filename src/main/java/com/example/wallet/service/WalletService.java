@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.wallet.entity.TransactionType;
 import com.example.wallet.entity.User;
 import com.example.wallet.entity.Wallet;
 import com.example.wallet.entity.WalletStatus;
@@ -20,10 +21,12 @@ import com.example.wallet.repository.WalletRepository;
 public class WalletService {
     private final WalletRepository wallets;
     private final UserRepository users;
+    private final TransactionLimitService limits;
 
-    public WalletService(WalletRepository wallets, UserRepository users) {
+    public WalletService(WalletRepository wallets, UserRepository users, TransactionLimitService limits) {
         this.wallets = wallets;
         this.users = users;
+        this.limits = limits;
     }
 
     /**
@@ -49,9 +52,17 @@ public class WalletService {
                 .orElseThrow(WalletNotFoundException::new);
     }
 
-    @Transactional 
+    /**
+     * Locked (findByIdForUpdate) for the same reason as withdraw() below: the limit check reads
+     * recent transactions, then this deposit becomes one of them once inserted -- a second
+     * concurrent deposit for the same wallet has to wait for this one to fully commit (limit
+     * check included) before it can run its own check, or two deposits that each individually
+     * looked fine could together blow past the limit.
+     */
+    @Transactional
     public Wallet deposit(UUID walletId, String userId, BigDecimal amount) {
-        Wallet wallet = wallets.findById(walletId).filter(w -> w.getUserId().equals(userId)).orElseThrow(WalletNotFoundException::new);
+        Wallet wallet = wallets.findByIdForUpdate(walletId).filter(w -> w.getUserId().equals(userId)).orElseThrow(WalletNotFoundException::new);
+        limits.checkWithinLimit(walletId, TransactionType.DEPOSIT, amount);
         BigDecimal balance = wallet.getBalance();
         BigDecimal newAmount = balance.add(amount);
         BigDecimal curReserved = wallet.getReserved();
@@ -95,6 +106,8 @@ public class WalletService {
         if (wallet.getStatus() != WalletStatus.ACTIVE) {
             throw new WalletNotActiveException();
         }
+        // Limit check before balance check, matching the skill's own withdrawal flow ordering.
+        limits.checkWithinLimit(walletId, TransactionType.WITHDRAWAL, amount);
         // Check available (balance - reserved), not raw balance. `reserved` is the sum of
         // deposits still awaiting gateway confirmation -- money already added to `balance` up
         // front (see WalletService.deposit) but not actually settled yet. If a withdrawal only

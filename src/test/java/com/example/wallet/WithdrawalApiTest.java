@@ -8,7 +8,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -87,6 +90,14 @@ class WithdrawalApiTest {
                 .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
+    }
+
+    /** Same purpose as DepositApiTest's version -- set up prior totals at specific times. */
+    private void seedTransaction(String type, String amount, String status, Instant createdAt) {
+        jdbc.update("INSERT INTO transactions (id, wallet_id, type, amount, status, external_reference, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+                UUID.randomUUID(), wallet.getId(), type, new BigDecimal(amount), status,
+                Timestamp.from(createdAt), Timestamp.from(createdAt));
     }
 
     @Test
@@ -285,5 +296,65 @@ class WithdrawalApiTest {
                 .isEqualByComparingTo(new BigDecimal("60.00")); // debited once, not up to 8 times
         assertThat(transactions.findAll().stream().filter(t -> t.getWalletId().equals(wallet.getId())).count())
                 .isEqualTo(1);
+    }
+
+    // --- Iteration 3e: transaction limits (test config: daily-withdrawal=1000, weekly-withdrawal=5000) ---
+
+    @Test
+    void dailyWithdrawalLimitExceededRejected() throws Exception {
+        jdbc.update("UPDATE wallets SET balance = 2000.00 WHERE id = ?", wallet.getId()); // not the constraint here
+        seedTransaction("WITHDRAWAL", "950.00", "COMPLETED", Instant.now());
+
+        withdraw("alice", "wd-limit-1", "{\"amount\": 100.00, \"otp\": \"123456\"}") // 950 + 100 > 1000
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("TRANSACTION_LIMIT_EXCEEDED"));
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("2000.00")); // untouched
+    }
+
+    @Test
+    void weeklyWithdrawalLimitExceededRejected() throws Exception {
+        jdbc.update("UPDATE wallets SET balance = 6000.00 WHERE id = ?", wallet.getId());
+        seedTransaction("WITHDRAWAL", "4950.00", "COMPLETED", Instant.now().minus(Duration.ofDays(3)));
+
+        withdraw("alice", "wd-limit-2", "{\"amount\": 100.00, \"otp\": \"123456\"}") // 4950 + 100 > 5000
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("TRANSACTION_LIMIT_EXCEEDED"));
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("6000.00"));
+    }
+
+    /**
+     * The skill's other explicit concurrency requirement: two withdrawals that each individually
+     * stay under the daily limit, but together exceed it -- only one may succeed. Balance is set
+     * high enough that it's never the binding constraint here; the wallet row lock withdraw()
+     * already holds (for the balance check) is what's actually protecting the limit check too.
+     */
+    @Test
+    void concurrentWithdrawalsCannotBypassDailyLimit() throws Exception {
+        jdbc.update("UPDATE wallets SET balance = 10000.00 WHERE id = ?", wallet.getId());
+
+        int n = 2;
+        ExecutorService pool = Executors.newFixedThreadPool(n);
+        CountDownLatch start = new CountDownLatch(1);
+        var results = new java.util.ArrayList<Future<Integer>>();
+        for (int i = 0; i < n; i++) {
+            String key = "wd-limit-concurrent-" + i;
+            results.add(pool.submit(() -> {
+                start.await();
+                return withdraw("alice", key, "{\"amount\": 600.00, \"otp\": \"123456\"}") // 600+600 > 1000
+                        .andReturn().getResponse().getStatus();
+            }));
+        }
+        start.countDown();
+        int okCount = 0;
+        for (var f : results) {
+            int status = f.get();
+            if (status == 200) okCount++;
+            else assertThat(status).isEqualTo(422); // TRANSACTION_LIMIT_EXCEEDED for the loser
+        }
+        pool.shutdown();
+
+        assertThat(okCount).isEqualTo(1);
     }
 }
