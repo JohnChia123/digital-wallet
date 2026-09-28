@@ -9,6 +9,7 @@ import org.springframework.web.client.RestClient;
 
 import com.example.wallet.dto.PaymentRequest;
 import com.example.wallet.dto.PaymentResponse;
+import com.example.wallet.entity.TransactionStatus;
 
 @Service
 public class PaymentProcessor {
@@ -44,32 +45,30 @@ public class PaymentProcessor {
                     .retrieve()
                     .body(PaymentResponse.class);
         } catch (Exception e) {
-            // Only the gateway call itself failing lands here -- safe to mark FAILED and reverse.
+            // Per the skill's timeout rule: a client-side exception (timeout, connection issue,
+            // gateway unreachable, ...) does NOT mean the payment failed -- the gateway may have
+            // actually succeeded and the response just never arrived. Do NOT compensate here;
+            // leave the transaction PENDING. (3f adds retrying this instead of giving up after
+            // one attempt.)
             System.err.println(
-                    "Payment failed: " + e.getMessage()
+                    "Deposit gateway call failed, leaving PENDING: " + e.getMessage()
             );
-            transactionService.failPayment(txnId, walletId, userId, amount);
             return;
         }
 
-        // The gateway already confirmed success by this point. If confirmPayment throws, that
-        // must NOT be treated as a gateway failure -- the payment genuinely went through; only
-        // the bookkeeping about it failed. So this is deliberately outside the try/catch above.
-        System.out.println(
-                "Payment succeeded: " + response.transactionStatus()
-        );
-        transactionService.confirmPayment(txnId, walletId, userId, amount);
+        if (response.transactionStatus() == TransactionStatus.COMPLETED) {
+            transactionService.confirmPayment(txnId, walletId, userId, amount);
+        } else {
+            // A FAILED response is a genuine synchronous decline from the gateway -- definite,
+            // not a communication problem -- so it's compensated immediately.
+            transactionService.failPayment(txnId, walletId, userId, amount);
+        }
     }
 
     /**
      * Withdrawal's money already moved (debited) before this runs, in the opposite direction from
      * deposit -- so success needs no wallet touch (confirmWithdrawal), and failure needs a refund
-     * (failWithdrawal), not a debit reversal. Same try/catch shape and same reasoning as
-     * processDepositAsync for why the post-gateway-success call sits outside the try/catch.
-     *
-     * No timeout/definite-failure distinction yet -- every exception here is treated as a definite
-     * failure and compensated immediately, which the skill explicitly warns against for
-     * withdrawals. That's deferred to 3f along with retries.
+     * (failWithdrawal), not a debit reversal. Same reasoning as processDepositAsync otherwise.
      */
     @Async
     public void processWithdrawAsync(
@@ -92,15 +91,15 @@ public class PaymentProcessor {
                     .body(PaymentResponse.class);
         } catch (Exception e) {
             System.err.println(
-                    "Withdrawal failed: " + e.getMessage()
+                    "Withdrawal gateway call failed, leaving PENDING: " + e.getMessage()
             );
-            transactionService.failWithdrawal(txnId, walletId, userId, amount);
             return;
         }
 
-        System.out.println(
-                "Withdrawal succeeded: " + response.transactionStatus()
-        );
-        transactionService.confirmWithdrawal(txnId);
+        if (response.transactionStatus() == TransactionStatus.COMPLETED) {
+            transactionService.confirmWithdrawal(txnId);
+        } else {
+            transactionService.failWithdrawal(txnId, walletId, userId, amount);
+        }
     }
 }

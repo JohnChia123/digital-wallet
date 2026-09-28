@@ -38,6 +38,7 @@ import com.example.wallet.entity.TransactionStatus;
 import com.example.wallet.entity.Wallet;
 import com.example.wallet.repository.TransactionRepository;
 import com.example.wallet.repository.WalletRepository;
+import com.example.wallet.service.GatewaySimulator;
 import com.example.wallet.service.WalletService;
 
 /**
@@ -65,6 +66,7 @@ class WithdrawalApiTest {
     @Autowired WalletRepository wallets;
     @Autowired TransactionRepository transactions;
     @Autowired JdbcTemplate jdbc;
+    @Autowired GatewaySimulator gatewaySimulator;
 
     Wallet wallet;
 
@@ -356,5 +358,56 @@ class WithdrawalApiTest {
         pool.shutdown();
 
         assertThat(okCount).isEqualTo(1);
+    }
+
+    // --- Iteration 3d/3f: gateway failure modes, retries, audit logging ---
+
+    /**
+     * Skill's explicit compensation scenario: balance 100 -> withdraw 50 -> 50/PENDING ->
+     * gateway definite failure -> compensation -> 100/FAILED. A FAILED response is not retried.
+     */
+    @Test
+    void gatewayPermanentFailureCompensatesAndRestoresBalance() throws Exception {
+        gatewaySimulator.arrange(wallet.getId(), GatewaySimulator.Mode.PERMANENT_FAILURE);
+
+        withdraw("alice", "wd-perm-fail", "{\"amount\": 50.00, \"otp\": \"123456\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("50.00")); // debited immediately
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Transaction txn = transactions.findAll().stream()
+                    .filter(t -> t.getWalletId().equals(wallet.getId()))
+                    .findFirst().orElseThrow();
+            assertThat(txn.getStatus()).isEqualTo(TransactionStatus.FAILED);
+            assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                    .isEqualByComparingTo(new BigDecimal("100.00")); // refunded
+        });
+    }
+
+    /**
+     * Skill's exact timeout example: the gateway performs the payout, the response is lost, the
+     * wallet times out. At 3d there's no retry yet -- the transaction is left PENDING, exactly as
+     * the skill's "do not immediately compensate" rule requires, with no further action taken.
+     * (3f adds retrying this instead of giving up after one attempt.)
+     */
+    @Test
+    void gatewayTimeoutLeavesTransactionPendingUncompensated() throws Exception {
+        gatewaySimulator.arrange(wallet.getId(), GatewaySimulator.Mode.TIMEOUT);
+
+        withdraw("alice", "wd-timeout", "{\"amount\": 40.00, \"otp\": \"123456\"}")
+                .andExpect(status().isOk());
+
+        // No await() to a terminal status here -- the point is that nothing resolves it. Wait
+        // comfortably past the simulated gateway delay, then assert it's still exactly PENDING.
+        Thread.sleep(1000);
+        Transaction txn = transactions.findAll().stream()
+                .filter(t -> t.getWalletId().equals(wallet.getId()))
+                .findFirst().orElseThrow();
+        assertThat(txn.getStatus()).isEqualTo(TransactionStatus.PENDING);
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("60.00")); // debited at initiation, not refunded
     }
 }

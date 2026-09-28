@@ -60,14 +60,32 @@ class PaymentProcessorTest {
         verify(transactionService, never()).failPayment(any(), any(), any(), any());
     }
 
+    /** A FAILED response body is a genuine synchronous decline from the gateway -- compensated. */
     @Test
-    void gatewayFailureMarksTransactionFailedAndRevertsDeposit() {
+    void gatewayDeclineResponseCompensatesDeposit() {
+        when(bodySpec.body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
+                .thenReturn(new PaymentResponse(txnId, walletId, TransactionStatus.FAILED));
+
+        processor.processDepositAsync(txnId, walletId, userId, amount);
+
+        verify(transactionService).failPayment(txnId, walletId, userId, amount);
+        verify(transactionService, never()).confirmPayment(any(), any(), any(), any());
+    }
+
+    /**
+     * Per the skill's timeout rule: a client-side exception from the gateway call (timeout,
+     * connection issue, gateway unreachable, ...) does NOT mean the payment failed -- the gateway
+     * may have actually succeeded and the response just never arrived. This must NOT compensate;
+     * the transaction is left PENDING. (3f adds retrying instead of giving up after one attempt.)
+     */
+    @Test
+    void gatewayCallExceptionLeavesTransactionPendingUncompensated() {
         when(bodySpec.body(any(PaymentRequest.class)).retrieve().body(PaymentResponse.class))
                 .thenThrow(new RuntimeException("gateway unreachable"));
 
         processor.processDepositAsync(txnId, walletId, userId, amount);
 
-        verify(transactionService).failPayment(txnId, walletId, userId, amount);
+        verify(transactionService, never()).failPayment(any(), any(), any(), any());
         verify(transactionService, never()).confirmPayment(any(), any(), any(), any());
     }
 

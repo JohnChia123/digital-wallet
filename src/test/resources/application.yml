@@ -5,6 +5,8 @@ wallet:
     # Fixed (not random) so it can equal server.port below without a @DynamicPropertySource.
     # Distinct from 8080 so this doesn't collide with a `mvn spring-boot:run` left running locally.
     base-url: http://localhost:9090
+    # Short so a simulated GatewaySimulator.Mode.TIMEOUT doesn't make the test suite slow.
+    timeout-ms: 300
   limits:
     # Small, deliberately: comfortably above every amount the existing tests use (max ~150), but
     # low enough that a dedicated test can exceed them without absurd numbers.

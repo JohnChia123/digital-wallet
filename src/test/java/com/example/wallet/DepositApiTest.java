@@ -32,6 +32,7 @@ import com.example.wallet.entity.TransactionStatus;
 import com.example.wallet.entity.Wallet;
 import com.example.wallet.repository.TransactionRepository;
 import com.example.wallet.repository.WalletRepository;
+import com.example.wallet.service.GatewaySimulator;
 import com.example.wallet.service.WalletService;
 
 /**
@@ -62,6 +63,7 @@ class DepositApiTest {
     @Autowired WalletRepository wallets;
     @Autowired TransactionRepository transactions;
     @Autowired JdbcTemplate jdbc;
+    @Autowired GatewaySimulator gatewaySimulator;
 
     Wallet wallet;
 
@@ -249,5 +251,51 @@ class DepositApiTest {
                 .andExpect(jsonPath("$.code").value("TRANSACTION_LIMIT_EXCEEDED"));
         assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
                 .isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    // --- Iteration 3d/3f: gateway failure modes and retries ---
+
+    /** A FAILED (definite) gateway response reverts the credit-then-confirm deposit, not retried. */
+    @Test
+    void gatewayPermanentFailureRevertsDeposit() throws Exception {
+        gatewaySimulator.arrange(wallet.getId(), GatewaySimulator.Mode.PERMANENT_FAILURE);
+
+        deposit("alice", "dep-perm-fail", "{\"amount\": 100.00}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("100.00")); // credited immediately
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Transaction txn = transactions.findAll().stream()
+                    .filter(t -> t.getWalletId().equals(wallet.getId()))
+                    .findFirst().orElseThrow();
+            assertThat(txn.getStatus()).isEqualTo(TransactionStatus.FAILED);
+
+            Wallet reverted = wallets.findById(wallet.getId()).orElseThrow();
+            assertThat(reverted.getBalance()).isEqualByComparingTo(BigDecimal.ZERO); // reverted
+            assertThat(reverted.getReserved()).isEqualByComparingTo(BigDecimal.ZERO);
+        });
+    }
+
+    /** Same timeout story as WithdrawalApiTest's version, for the deposit path. */
+    @Test
+    void gatewayTimeoutLeavesTransactionPendingUncompensated() throws Exception {
+        gatewaySimulator.arrange(wallet.getId(), GatewaySimulator.Mode.TIMEOUT);
+
+        deposit("alice", "dep-timeout", "{\"amount\": 100.00}").andExpect(status().isOk());
+
+        Thread.sleep(1000);
+        Transaction txn = transactions.findAll().stream()
+                .filter(t -> t.getWalletId().equals(wallet.getId()))
+                .findFirst().orElseThrow();
+        assertThat(txn.getStatus()).isEqualTo(TransactionStatus.PENDING);
+
+        // Still credited-but-reserved from the up-front credit-then-confirm step -- untouched
+        // since nothing resolved it yet.
+        Wallet unresolved = wallets.findById(wallet.getId()).orElseThrow();
+        assertThat(unresolved.getBalance()).isEqualByComparingTo(new BigDecimal("100.00"));
+        assertThat(unresolved.getReserved()).isEqualByComparingTo(new BigDecimal("100.00"));
     }
 }

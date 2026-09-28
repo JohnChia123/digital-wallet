@@ -14,6 +14,9 @@ wallet:
   payment:
     # The mock payment gateway lives in this same app; treat it as an external base URL anyway.
     base-url: ${PAYMENT_BASE_URL:http://localhost:8080}
+    # Connect/read timeout for the outbound gateway call -- what makes a slow gateway response
+    # (GatewaySimulator.Mode.TIMEOUT) actually observable client-side as a timeout exception.
+    timeout-ms: ${WALLET_PAYMENT_TIMEOUT_MS:3000}
   limits:
     # Never hardcoded -- read from the environment, per the skill's exact variable names.
     daily-deposit: ${WALLET_DAILY_DEPOSIT_LIMIT:10000}

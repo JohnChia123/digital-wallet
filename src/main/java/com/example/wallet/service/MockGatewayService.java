@@ -1,8 +1,10 @@
 package com.example.wallet.service;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -13,16 +15,33 @@ import com.example.wallet.repository.GatewayPaymentRepository;
 
 /**
  * Shared "external gateway" logic behind both MockPaymentController and MockWithdrawalController.
- * Always succeeds -- failure modes land with 3d -- but genuinely tracks what it's already
- * processed, so a repeated call for the same txnId (a retry of the wallet service's own outbound
- * call, once 3f adds retries) replays the original result instead of paying out twice.
+ * Genuinely tracks what it's already processed, so a repeated call for the same txnId (a retry of
+ * the wallet service's own outbound call) replays the original result instead of paying out twice.
+ *
+ * Behavior for a given call is normally SUCCESS, unless a test has armed GatewaySimulator for this
+ * walletId:
+ *   - PERMANENT_FAILURE: the gateway processed and declined the request -- a genuine synchronous
+ *     response (HTTP 200, status FAILED), not a network-level error. The caller must not retry this.
+ *   - TIMEOUT: models the skill's example exactly ("payment provider performs payout, response is
+ *     lost, wallet receives timeout") -- the payout is still recorded as COMPLETED here, but the
+ *     response is delayed past the client's read timeout so the caller experiences a client-side
+ *     timeout exception instead of ever seeing this response. A retry with the same Idempotency-Key
+ *     then finds the already-COMPLETED record below and replays it immediately, so a gateway retry
+ *     never pays out twice.
  */
 @Service
 public class MockGatewayService {
     private final GatewayPaymentRepository payments;
+    private final GatewaySimulator simulator;
+    private final long timeoutMs;
 
-    public MockGatewayService(GatewayPaymentRepository payments) {
+    public MockGatewayService(
+            GatewayPaymentRepository payments,
+            GatewaySimulator simulator,
+            @Value("${wallet.payment.timeout-ms}") long timeoutMs) {
         this.payments = payments;
+        this.simulator = simulator;
+        this.timeoutMs = timeoutMs;
     }
 
     /**
@@ -46,8 +65,16 @@ public class MockGatewayService {
             return new PaymentResponse(txnId, payment.getWalletId(), payment.getStatus());
         }
 
+        GatewaySimulator.Mode mode = simulator.consume(walletId);
+        if (mode == GatewaySimulator.Mode.TIMEOUT) {
+            sleepPastClientTimeout();
+        }
+        TransactionStatus status = mode == GatewaySimulator.Mode.PERMANENT_FAILURE
+                ? TransactionStatus.FAILED
+                : TransactionStatus.COMPLETED;
+
         try {
-            payments.saveAndFlush(new GatewayPayment(txnId, walletId, amount, TransactionStatus.COMPLETED));
+            payments.saveAndFlush(new GatewayPayment(txnId, walletId, amount, status));
         } catch (DataIntegrityViolationException e) {
             // A concurrent duplicate call for the same txnId won the race on the primary key --
             // re-read what it stored rather than processing (and paying out) a second time.
@@ -55,6 +82,14 @@ public class MockGatewayService {
             return new PaymentResponse(txnId, payment.getWalletId(), payment.getStatus());
         }
 
-        return new PaymentResponse(txnId, walletId, TransactionStatus.COMPLETED);
+        return new PaymentResponse(txnId, walletId, status);
+    }
+
+    private void sleepPastClientTimeout() {
+        try {
+            Thread.sleep(Duration.ofMillis(timeoutMs + 200));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
