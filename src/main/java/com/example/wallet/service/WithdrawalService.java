@@ -22,7 +22,7 @@ public class WithdrawalService {
         this.paymentProcessor = paymentProcessor;
     }
 
-    public Transaction withdraw(UUID walletId, String userId, BigDecimal amount, String otp) {
+    public Transaction withdraw(UUID walletId, String userId, BigDecimal amount, String otp, String idempotencyKey) {
         if (!SIMULATED_VALID_OTP.equals(otp)) {
             throw new InvalidOtpException();
         }
@@ -31,7 +31,7 @@ public class WithdrawalService {
         // transaction row all in one DB transaction (see TransactionService.initiateWithdrawal).
         Transaction txn = transactionService.initiateWithdrawal(walletId, userId, amount);
 
-        paymentProcessor.processWithdrawAsync(txn.getId(), walletId, userId, amount);
+        paymentProcessor.processWithdrawAsync(txn.getId(), walletId, userId, amount, idempotencyKey);
 
         return txn;
     }

@@ -71,10 +71,24 @@ public class TransactionService {
     }
 
     /**
+     * Locks the wallet, checks limits, credits it (balance + reserved), and inserts the PENDING
+     * transaction row -- all in one database transaction, same shape as initiateWithdrawal. Two
+     * separate commits would leave a window where the lock is released but the row doesn't exist
+     * yet: a concurrent deposit's limit check (which sums transaction rows) would miss this one,
+     * and a failure between the commits would leave a credited, reserved wallet with no
+     * transaction row and no gateway call to ever settle it.
+     */
+    @Transactional
+    public Transaction initiateDeposit(UUID walletId, String userId, BigDecimal amount) {
+        wallets.deposit(walletId, userId, amount);
+        return insert(walletId, TransactionType.DEPOSIT, amount);
+    }
+
+    /**
      * Locks the wallet, validates and debits it, and inserts the PENDING transaction row -- all in
      * one database transaction, per the skill's withdrawal flow (lock -> validate -> debit ->
-     * insert, one BEGIN/COMMIT). Unlike the deposit path, this can't be split into two separate
-     * calls without risking a debited wallet with no transaction row to show for it.
+     * insert, one BEGIN/COMMIT). This can't be split into two separate calls without risking a
+     * debited wallet with no transaction row to show for it.
      */
     @Transactional
     public Transaction initiateWithdrawal(UUID walletId, String userId, BigDecimal amount) {

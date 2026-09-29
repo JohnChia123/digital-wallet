@@ -41,6 +41,11 @@ import com.example.wallet.repository.WalletRepository;
 import com.example.wallet.service.GatewaySimulator;
 import com.example.wallet.service.WalletService;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+
 /**
  * Same reasoning as DepositApiTest for DEFINED_PORT + its own Testcontainers container:
  * PaymentProcessor.processWithdrawAsync makes a genuine outbound call back into this same app.
@@ -389,25 +394,51 @@ class WithdrawalApiTest {
 
     /**
      * Skill's exact timeout example: the gateway performs the payout, the response is lost, the
-     * wallet times out. At 3d there's no retry yet -- the transaction is left PENDING, exactly as
-     * the skill's "do not immediately compensate" rule requires, with no further action taken.
-     * (3f adds retrying this instead of giving up after one attempt.)
+     * wallet times out and retries with the same Idempotency-Key. Must settle COMPLETED without
+     * ever debiting a second time -- the debit only ever happens once, at initiation.
      */
     @Test
-    void gatewayTimeoutLeavesTransactionPendingUncompensated() throws Exception {
+    void gatewayTimeoutRetriesAndEventuallySettlesWithoutDoublePayout() throws Exception {
         gatewaySimulator.arrange(wallet.getId(), GatewaySimulator.Mode.TIMEOUT);
 
         withdraw("alice", "wd-timeout", "{\"amount\": 40.00, \"otp\": \"123456\"}")
                 .andExpect(status().isOk());
 
-        // No await() to a terminal status here -- the point is that nothing resolves it. Wait
-        // comfortably past the simulated gateway delay, then assert it's still exactly PENDING.
-        Thread.sleep(1000);
-        Transaction txn = transactions.findAll().stream()
-                .filter(t -> t.getWalletId().equals(wallet.getId()))
-                .findFirst().orElseThrow();
-        assertThat(txn.getStatus()).isEqualTo(TransactionStatus.PENDING);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            Transaction txn = transactions.findAll().stream()
+                    .filter(t -> t.getWalletId().equals(wallet.getId()))
+                    .findFirst().orElseThrow();
+            assertThat(txn.getStatus()).isEqualTo(TransactionStatus.COMPLETED);
+        });
+
         assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
-                .isEqualByComparingTo(new BigDecimal("60.00")); // debited at initiation, not refunded
+                .isEqualByComparingTo(new BigDecimal("60.00")); // debited once, not twice
+    }
+
+    /** Sensitive values (OTP, bearer tokens) must never appear in logs, including async gateway logs. */
+    @Test
+    void otpAndAuthTokenNeverAppearInLogs() throws Exception {
+        Logger rootLogger = (Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        rootLogger.addAppender(appender);
+        try {
+            withdraw("alice", "wd-log-1", "{\"amount\": 40.00, \"otp\": \"123456\"}")
+                    .andExpect(status().isOk());
+            await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+                Transaction txn = transactions.findAll().stream()
+                        .filter(t -> t.getWalletId().equals(wallet.getId()))
+                        .findFirst().orElseThrow();
+                assertThat(txn.getStatus()).isEqualTo(TransactionStatus.COMPLETED);
+            });
+        } finally {
+            rootLogger.detachAppender(appender);
+        }
+
+        for (ILoggingEvent event : appender.list) {
+            String formatted = event.getFormattedMessage();
+            assertThat(formatted).doesNotContain("123456"); // the OTP
+            assertThat(formatted).doesNotContain("Bearer "); // no raw Authorization header dumps
+        }
     }
 }

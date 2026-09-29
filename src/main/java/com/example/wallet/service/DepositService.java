@@ -6,25 +6,24 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 import com.example.wallet.entity.Transaction;
-import com.example.wallet.entity.TransactionType;
 
 @Service
 public class DepositService {
-    private final WalletService walletService;
     private final TransactionService transactionService;
     private final PaymentProcessor paymentProcessor;
 
-    public DepositService(WalletService walletService, TransactionService transactionService, PaymentProcessor paymentProcessor) {
-        this.walletService = walletService;
+    public DepositService(TransactionService transactionService, PaymentProcessor paymentProcessor) {
         this.transactionService = transactionService;
         this.paymentProcessor = paymentProcessor;
     }
 
-    public Transaction deposit(UUID walletId, String userId, BigDecimal amount) {
-        walletService.deposit(walletId, userId, amount);
-        Transaction txn = transactionService.insert(walletId, TransactionType.DEPOSIT, amount);
+    public Transaction deposit(UUID walletId, String userId, BigDecimal amount, String idempotencyKey) {
+        // Credits the wallet and inserts the PENDING transaction row in one DB transaction (see
+        // TransactionService.initiateDeposit). The gateway call is kicked off only after that has
+        // committed, so the async thread never looks for a row that isn't visible yet.
+        Transaction txn = transactionService.initiateDeposit(walletId, userId, amount);
 
-        paymentProcessor.processDepositAsync(txn.getId(), walletId, userId, amount);
+        paymentProcessor.processDepositAsync(txn.getId(), walletId, userId, amount, idempotencyKey);
 
         return txn;
     }

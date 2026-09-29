@@ -253,6 +253,43 @@ class DepositApiTest {
                 .isEqualByComparingTo(BigDecimal.ZERO);
     }
 
+    /**
+     * Distinct idempotency keys, so these are genuinely separate deposits racing the limit check.
+     * Each 600 fits the 1000 daily limit alone, but any two together don't -- exactly one may
+     * succeed. Guards the credit + transaction-row insert staying in one DB transaction: if they
+     * commit separately, the wallet lock is released before the row exists and a concurrent
+     * deposit's limit check (which sums transaction rows) misses it.
+     */
+    @Test
+    void concurrentDepositsCannotTogetherExceedDailyLimit() throws Exception {
+        int n = 8;
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(n);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var results = new java.util.ArrayList<java.util.concurrent.Future<Integer>>();
+        for (int i = 0; i < n; i++) {
+            String key = "dep-limit-race-" + i;
+            results.add(pool.submit(() -> {
+                start.await();
+                return deposit("alice", key, "{\"amount\": 600.00}")
+                        .andReturn().getResponse().getStatus();
+            }));
+        }
+        start.countDown();
+        int okCount = 0;
+        for (var f : results) {
+            int status = f.get();
+            if (status == 200) okCount++;
+            else assertThat(status).isEqualTo(422); // TRANSACTION_LIMIT_EXCEEDED
+        }
+        pool.shutdown();
+
+        assertThat(okCount).isEqualTo(1);
+        assertThat(wallets.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(new BigDecimal("600.00"));
+        assertThat(transactions.findAll().stream().filter(t -> t.getWalletId().equals(wallet.getId())).count())
+                .isEqualTo(1);
+    }
+
     // --- Iteration 3d/3f: gateway failure modes and retries ---
 
     /** A FAILED (definite) gateway response reverts the credit-then-confirm deposit, not retried. */
@@ -279,23 +316,22 @@ class DepositApiTest {
         });
     }
 
-    /** Same timeout story as WithdrawalApiTest's version, for the deposit path. */
+    /** Same timeout/retry/idempotency story as WithdrawalApiTest's version, for the deposit path. */
     @Test
-    void gatewayTimeoutLeavesTransactionPendingUncompensated() throws Exception {
+    void gatewayTimeoutRetriesAndEventuallySettlesCompleted() throws Exception {
         gatewaySimulator.arrange(wallet.getId(), GatewaySimulator.Mode.TIMEOUT);
 
         deposit("alice", "dep-timeout", "{\"amount\": 100.00}").andExpect(status().isOk());
 
-        Thread.sleep(1000);
-        Transaction txn = transactions.findAll().stream()
-                .filter(t -> t.getWalletId().equals(wallet.getId()))
-                .findFirst().orElseThrow();
-        assertThat(txn.getStatus()).isEqualTo(TransactionStatus.PENDING);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            Transaction txn = transactions.findAll().stream()
+                    .filter(t -> t.getWalletId().equals(wallet.getId()))
+                    .findFirst().orElseThrow();
+            assertThat(txn.getStatus()).isEqualTo(TransactionStatus.COMPLETED);
 
-        // Still credited-but-reserved from the up-front credit-then-confirm step -- untouched
-        // since nothing resolved it yet.
-        Wallet unresolved = wallets.findById(wallet.getId()).orElseThrow();
-        assertThat(unresolved.getBalance()).isEqualByComparingTo(new BigDecimal("100.00"));
-        assertThat(unresolved.getReserved()).isEqualByComparingTo(new BigDecimal("100.00"));
+            Wallet settled = wallets.findById(wallet.getId()).orElseThrow();
+            assertThat(settled.getBalance()).isEqualByComparingTo(new BigDecimal("100.00")); // once, not twice
+            assertThat(settled.getReserved()).isEqualByComparingTo(BigDecimal.ZERO);
+        });
     }
 }

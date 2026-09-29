@@ -7,6 +7,9 @@ wallet:
     base-url: http://localhost:9090
     # Short so a simulated GatewaySimulator.Mode.TIMEOUT doesn't make the test suite slow.
     timeout-ms: 300
+    retry:
+      max-attempts: 3
+      base-delay-ms: 50
   limits:
     # Small, deliberately: comfortably above every amount the existing tests use (max ~150), but
     # low enough that a dedicated test can exceed them without absurd numbers.
@@ -22,4 +25,4 @@ server:
 
 logging:
   level:
-    org.springframework.security: DEBUG
+    org.springframework.security: INFO

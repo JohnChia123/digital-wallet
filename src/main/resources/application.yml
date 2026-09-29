@@ -17,6 +17,11 @@ wallet:
     # Connect/read timeout for the outbound gateway call -- what makes a slow gateway response
     # (GatewaySimulator.Mode.TIMEOUT) actually observable client-side as a timeout exception.
     timeout-ms: ${WALLET_PAYMENT_TIMEOUT_MS:3000}
+    retry:
+      # Only transient failures (timeout, connection issue, HTTP 5xx) are retried -- see
+      # PaymentProcessor.isRetryable. Exponential backoff + jitter between attempts.
+      max-attempts: ${WALLET_PAYMENT_RETRY_MAX_ATTEMPTS:4}
+      base-delay-ms: ${WALLET_PAYMENT_RETRY_BASE_DELAY_MS:500}
   limits:
     # Never hardcoded -- read from the environment, per the skill's exact variable names.
     daily-deposit: ${WALLET_DAILY_DEPOSIT_LIMIT:10000}
@@ -25,4 +30,6 @@ wallet:
     weekly-withdrawal: ${WALLET_WEEKLY_WITHDRAWAL_LIMIT:20000}
 logging:
   level:
-    org.springframework.security: DEBUG
+    # DEBUG here would log request/token details from the security filter chain -- not compatible
+    # with the "never log JWTs, OTP values, credentials" requirement, so this stays at INFO.
+    org.springframework.security: INFO

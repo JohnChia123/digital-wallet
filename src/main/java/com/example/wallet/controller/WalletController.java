@@ -72,7 +72,7 @@ public class WalletController {
 
         TransactionResponse response;
         try {
-            response = TransactionResponse.from(depositService.deposit(walletId, userId, request.amount()));
+            response = TransactionResponse.from(depositService.deposit(walletId, userId, request.amount(), idempotencyKey));
         } catch (RuntimeException e) {
             // The deposit itself never happened -- safe to free the key for a fresh retry.
             idempotencyService.abandon(userId, idempotencyKey);
@@ -104,7 +104,7 @@ public class WalletController {
         TransactionResponse response;
         try {
             response = TransactionResponse.from(
-                    withdrawalService.withdraw(walletId, userId, request.amount(), request.otp()));
+                    withdrawalService.withdraw(walletId, userId, request.amount(), request.otp(), idempotencyKey));
         } catch (RuntimeException e) {
             // The withdrawal itself never happened -- safe to free the key for a fresh retry.
             idempotencyService.abandon(userId, idempotencyKey);
