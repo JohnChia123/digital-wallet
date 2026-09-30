@@ -99,12 +99,41 @@ mvn test
 ```
 Tests use Testcontainers: each run starts a throwaway `postgres:16` container (Docker must be running) and applies the Flyway migrations to it. The first run pulls the image and is slower.
 
+## Seed sample data
+Start the app once first, so Flyway creates the schema. Then run:
+```
+docker compose exec -T postgres psql -U wallet -d digital_wallet < scripts/seed.sql
+```
+This creates two users. It is safe to re-run: it only replaces these two users' data.
+
+| User | Wallet ID | Data |
+|---|---|---|
+| `bob` | `b0b00000-0000-0000-0000-000000000001` | ACTIVE. 40 deposits and withdrawals over the last 30 days: COMPLETED, FAILED, and one PENDING deposit held in `reserved`. |
+| `carol` | `ca401000-0000-0000-0000-000000000001` | SUSPENDED. Withdrawals return `409 WALLET_NOT_ACTIVE`. |
+
+Dev tokens, signed with the default `WALLET_JWT_SECRET`, valid until 2100:
+```
+bob:   eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2IiLCJleHAiOjQxMDI0NDQ4MDB9.wQyVJC8V4QSywgLkNwhh4ScNb9Ym-13twdbhHAQ3zOI
+carol: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjYXJvbCIsImV4cCI6NDEwMjQ0NDgwMH0.xHntGTJGvYrAtSjEgEdED1NHUSJFobwCgoOAduod9VU
+```
+Example:
+```
+curl -H "Authorization: Bearer <bob token>" \
+  "localhost:8080/wallets/b0b00000-0000-0000-0000-000000000001/transactions?type=WITHDRAWAL&size=5"
+```
+
+## Try the API (Postman)
+Import `postman/wallet.postman_collection.json` and run it in order. It walks through every endpoint:
+the happy paths, then 400/401/404/409/422 errors and idempotency replays. It uses its own users
+(`alice`, `mallory`), so it doesn't touch the seed data, but it expects `alice` to have no wallet
+yet. Run it against a database where alice's wallet doesn't exist yet. Its tokens are also signed
+with the default `WALLET_JWT_SECRET`.
+
 ## Pagination
 Offset pagination (`page`/`size`) for the prototype: simple and lets clients jump to a page and see totals.
 Trade-off: deep pages get slower (the database still walks the skipped rows) and results can shift if new
 transactions arrive between requests. Cursor (keyset) pagination on `(created_at, id)` would fix both; the
-existing `(wallet_id, created_at DESC)` index already supports it.
-Transactions are only created by test fixtures until deposits/withdrawals arrive in Iteration 3.
+existing `(wallet_id, created_at DESC, id DESC)` index already supports it.
 
 ## Auth
 Bearer JWT, HS256, signed with `WALLET_JWT_SECRET` (simulated identity provider). The JWT `sub` is the user ID.
